@@ -24,7 +24,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.1.3"
+const appVersion = "1.1.4"
 
 // App es el puente entre la interfaz y la base local.
 type App struct {
@@ -124,6 +124,9 @@ func (a *App) SaveConvenio(in store.ConventionInput) (store.ConventionDetail, er
 	if err := a.store.Update(in); err != nil {
 		return store.ConventionDetail{}, err
 	}
+	if strings.TrimSpace(in.Facultad) != "" {
+		_ = a.ensureFacultyTag(in.ID, in.Facultad, "")
+	}
 	return a.store.Get(in.ID)
 }
 
@@ -177,6 +180,9 @@ func (a *App) SaveConvenioTags(id int64, tagIDs []int64) (store.ConventionDetail
 	if err := a.store.ReplaceTags(id, tagIDs, true); err != nil {
 		return store.ConventionDetail{}, err
 	}
+	if d, err := a.store.Get(id); err == nil && strings.TrimSpace(d.Facultad) != "" {
+		_ = a.ensureFacultyTag(id, d.Facultad, "")
+	}
 	return a.store.Get(id)
 }
 
@@ -184,6 +190,9 @@ func (a *App) SaveConvenioTags(id int64, tagIDs []int64) (store.ConventionDetail
 func (a *App) AcceptSuggestions(id int64) (store.ConventionDetail, error) {
 	if err := a.store.AcceptSuggestions(id); err != nil {
 		return store.ConventionDetail{}, err
+	}
+	if d, err := a.store.Get(id); err == nil && strings.TrimSpace(d.Facultad) != "" {
+		_ = a.ensureFacultyTag(id, d.Facultad, "")
 	}
 	return a.store.Get(id)
 }
@@ -357,14 +366,21 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 		return store.ConventionDetail{}, err
 	}
 	if strings.TrimSpace(res.Facultad) != "" {
-		_ = a.ensureFacultyTag(id, res.Facultad)
+		city := ""
+		for _, sug := range res.Sugerencias {
+			if sug.Tipo == "ciudad" {
+				city = sug.Nombre
+				break
+			}
+		}
+		_ = a.ensureFacultyTag(id, res.Facultad, city)
 	}
 	return a.store.Get(id)
 }
 
-// ensureFacultyTag crea, si hace falta, una etiqueta de tema con el nombre de
-// la facultad y la agrega al convenio sin borrar las etiquetas existentes.
-func (a *App) ensureFacultyTag(id int64, facultad string) error {
+// ensureFacultyTag crea, si hace falta, la etiqueta de tipo facultad con el
+// formato "Facultad de <nombre> <ciudad>" y la agrega al convenio.
+func (a *App) ensureFacultyTag(id int64, facultad, city string) error {
 	facultad = strings.TrimSpace(facultad)
 	if facultad == "" {
 		return nil
@@ -373,10 +389,26 @@ func (a *App) ensureFacultyTag(id int64, facultad string) error {
 	if err != nil {
 		return err
 	}
+	if strings.TrimSpace(city) == "" {
+		for _, t := range tags {
+			if t.Tipo == "ciudad" {
+				city = t.Nombre
+				break
+			}
+		}
+	}
+	if strings.TrimSpace(city) == "" {
+		// Sin ciudad no se puede construir el nombre exigido.
+		return nil
+	}
+	name := facultyTagName(facultad, city)
 	ids := make([]int64, 0, len(tags)+1)
 	for _, t := range tags {
-		if t.Tipo == "tema" && strings.EqualFold(t.Nombre, facultad) {
-			return nil
+		if t.Tipo == "facultad" {
+			if strings.EqualFold(t.Nombre, name) {
+				return nil
+			}
+			continue
 		}
 		ids = append(ids, t.ID)
 	}
@@ -387,19 +419,44 @@ func (a *App) ensureFacultyTag(id int64, facultad string) error {
 	var tag store.Tag
 	found := false
 	for _, t := range all {
-		if t.Tipo == "tema" && strings.EqualFold(t.Nombre, facultad) {
+		if t.Tipo == "facultad" && strings.EqualFold(t.Nombre, name) {
 			tag, found = t, true
 			break
 		}
 	}
 	if !found {
-		tag, err = a.store.CreateTag(store.TagInput{Nombre: facultad, Tipo: "tema", Color: "#3A5A9C"})
+		tag, err = a.store.CreateTag(store.TagInput{Nombre: name, Tipo: "facultad", Color: store.ColorFacultad})
 		if err != nil {
 			return err
 		}
 	}
 	ids = append(ids, tag.ID)
 	return a.store.ReplaceTags(id, ids, false)
+}
+
+// facultyTagName aplica el formato solicitado: Facultad de <nombre> <ciudad>.
+// Si el nombre ya incluye "Facultad de" o la ciudad, no se duplican.
+func facultyTagName(facultad, city string) string {
+	name := strings.Join(strings.Fields(strings.TrimSpace(facultad)), " ")
+	lower := strings.ToLower(name)
+	if strings.HasPrefix(lower, "facultad de ") {
+		name = "Facultad de " + strings.TrimSpace(name[len("facultad de "):])
+	} else if strings.HasPrefix(lower, "facultad ") {
+		name = "Facultad de " + strings.TrimSpace(name[len("facultad "):])
+	} else {
+		name = "Facultad de " + name
+	}
+	city = strings.Join(strings.Fields(strings.TrimSpace(city)), " ")
+	if city != "" && !strings.Contains(strings.ToLower(name), strings.ToLower(city)) {
+		name += " " + city
+	}
+	// El catálogo admite 80 caracteres; conserva el final (ciudad) si hay que recortar.
+	r := []rune(name)
+	if len(r) > 80 {
+		name = string(r[len(r)-80:])
+		name = strings.TrimSpace(name)
+	}
+	return name
 }
 
 // BeginTranscription prepara la transcripción de las páginas escaneadas.

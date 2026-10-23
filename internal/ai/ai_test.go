@@ -36,20 +36,23 @@ func TestValidateSuggestions(t *testing.T) {
 		map[string]interface{}{"tipo": "ciudad", "nombre": "Nueva Ciudad", "nueva": true},
 	}
 	got := validateSuggestions(items, catalogo)
-	if len(got) != 5 {
-		t.Fatalf("sugerencias = %+v, want 5", got)
+	if len(got) != 4 {
+		t.Fatalf("sugerencias = %+v, want 4", got)
 	}
 	if got[0].Nombre != "Nacional" || got[0].Tipo != "ambito" {
 		t.Fatalf("primera sugerencia: %+v", got[0])
 	}
-	var nueva bool
+	cities := 0
 	for _, s := range got {
-		if s.Tipo == "ciudad" && s.Nombre == "Nueva Ciudad" && s.Nueva {
-			nueva = true
+		if s.Tipo == "ciudad" {
+			cities++
+			if s.Nombre != "Acapulco" {
+				t.Fatalf("ciudad inesperada: %+v", s)
+			}
 		}
 	}
-	if !nueva {
-		t.Fatalf("no se conservó la ciudad nueva: %+v", got)
+	if cities != 1 {
+		t.Fatalf("se conservaron %d ciudades: %+v", cities, got)
 	}
 }
 

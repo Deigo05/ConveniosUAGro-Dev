@@ -126,7 +126,7 @@ func (s *Store) List(f ListFilter) (ListResult, error) {
 	if err != nil {
 		return ListResult{}, err
 	}
-	for _, tipo := range []string{"ambito", "estado", "ciudad", "tema"} {
+	for _, tipo := range []string{"ambito", "estado", "ciudad", "facultad", "tema"} {
 		ids := groups[tipo]
 		if len(ids) == 0 {
 			continue

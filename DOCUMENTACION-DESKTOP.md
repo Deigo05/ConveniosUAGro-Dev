@@ -84,7 +84,7 @@ La variable `CONVENIOS_DATA_DIR` permite usar otra carpeta (pruebas). El ejecuta
 ### Esquema
 
 - `convenios`: datos, archivo, `texto_pdf` original, `texto` final, estado IA, sugerencias, clasificación, estado de transcripción y fechas.
-- `etiquetas`: `ambito`, `estado`, `ciudad`, `tema`; `protegida` para las base.
+- `etiquetas`: `ambito`, `estado`, `ciudad`, `facultad`, `tema`; `protegida` para las base.
 - `convenio_etiquetas`: N:M con cascada.
 - `transcripcion_paginas`: texto por página, PK `(convenio_id, pagina)`.
 - `convenios_fts`: FTS5 sobre dependencia, archivo, notas y texto, con triggers.
@@ -126,7 +126,7 @@ El frontend llama `window.go.main.App.<Método>`.
 | `ChoosePDFs()` | Diálogo nativo de PDF |
 | `ImportPDFs(paths)` | Copiar/registrar PDF y extraer texto |
 | `SaveConvenioTags(id, ids)` | Reemplazar etiquetas y marcar revisado |
-| `AcceptSuggestions(id)` | Crear ciudades y aplicar sugerencias |
+| `AcceptSuggestions(id)` | Crear ciudades/facultades y aplicar sugerencias |
 | `DiscardSuggestions(id, remove)` | Descartar; opcionalmente dejar sin etiquetas |
 | `DeleteConvenios(ids)` | Borrar filas y PDF |
 | `DownloadPDF(id)` | Guardar como + copiar PDF |
@@ -174,8 +174,8 @@ Los estilos están en `styles.css`; no hay dependencias externas ni CDN. PDF.js 
 - Modelo por defecto: `deepseek-flash`.
 - Temperatura 0.1, `response_format=json_object`, timeout 150 s.
 - Valida fechas, duración, vigencia y etiquetas contra el catálogo.
-- Solo crea ciudades nuevas; los temas deben existir.
-- Máximo 8 etiquetas; una de ámbito, una de estado, hasta 3 ciudades y 4 temas.
+- Solo crea ciudades y facultades nuevas; los temas deben existir.
+- Máximo 8 etiquetas; una de ámbito, una de estado, una ciudad, una facultad y hasta 4 temas.
 - La extracción de datos no procesa PDF escaneados sin texto.
 
 ### Transcripción
@@ -236,7 +236,7 @@ Cubierto:
 
 - Esquema, etiquetas base, estado vacío.
 - CRUD, FTS, filtro por etiqueta, filtro de vigencia.
-- Sugerencias, creación de ciudades, protección de etiquetas base.
+- Sugerencias, creación de ciudades y facultades, protección de etiquetas base.
 - `SetAIResult` y respaldo ZIP.
 - Extracción de PDF y exportación.
 - Fechas en español, interpretación de IA y validación.
@@ -274,7 +274,7 @@ En el escritorio de Windows:
 C:\Users\PC\Desktop\ConveniosUAGro\
 ├── ConveniosUAGro.exe
 ├── Convenios UAGro-amd64-installer.exe
-├── ConveniosUAGro-1.1.3-win64.zip
+├── ConveniosUAGro-1.1.4-win64.zip
 ├── LEEME.txt
 ├── README.md
 ├── codigo-fuente.zip

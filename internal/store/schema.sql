@@ -42,7 +42,7 @@ CREATE INDEX IF NOT EXISTS ix_convenios_fechas ON convenios(fecha_vigencia, fech
 CREATE TABLE IF NOT EXISTS etiquetas (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   nombre    TEXT NOT NULL COLLATE NOCASE,
-  tipo      TEXT NOT NULL CHECK (tipo IN ('ambito','estado','ciudad','tema')),
+  tipo      TEXT NOT NULL CHECK (tipo IN ('ambito','estado','ciudad','tema','facultad')),
   color     TEXT NOT NULL DEFAULT '#3A5A9C',
   protegida INTEGER NOT NULL DEFAULT 0,
   creada_en TEXT NOT NULL DEFAULT (datetime('now'))
