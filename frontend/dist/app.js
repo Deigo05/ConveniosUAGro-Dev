@@ -24,6 +24,10 @@ const state = {
   current: null,
   pendingFiles: [],
   transcribing: null,
+  autoQueue: [],
+  autoRunning: false,
+  autoTotal: 0,
+  autoDone: 0,
   confirmResolve: null,
   searchTimer: null,
   tagTimer: null,
@@ -774,7 +778,7 @@ function renderAICard() {
     btn.disabled = c.es_escaneado && !c.texto;
     status.textContent = c.ia_estado === 'error' ? 'La última extracción falló.' : '';
   }
-  if (c.es_escaneado && !c.texto) {
+  if (c.es_escaneado && !c.texto && c.transcripcion_estado !== 'completa') {
     help.textContent = 'Este PDF no tiene texto seleccionable. La extracción automática no puede leerlo; captura los datos manualmente.';
   }
 }
@@ -839,25 +843,80 @@ function renderTranscription() {
 async function transcribeCurrent() {
   const c = state.current;
   if (!c) return;
-  if (state.transcribing) {
-    showToast('Ya hay una transcripción en curso.', 'info');
-    return;
-  }
-  if (!window.pdfjsLib) {
-    showToast('No se pudo cargar el motor de PDF para transcribir.', 'error');
-    return;
-  }
-  if (!state.config.ai_enabled || !state.config.has_api_key) {
-    showToast('Activa la IA y configura la clave en Ajustes.', 'error');
-    return;
-  }
-  const id = c.id;
-  const btn = $('#btn-transcribe');
-  btn.disabled = true;
-  btn.textContent = 'Preparando…';
   try {
-    const pdf = await window.pdfjsLib.getDocument({ url: `/pdf/${id}` }).promise;
-    const paginas = [];
+    await transcribeConvention(c.id, { confirm: true });
+    showToast('Transcripción completada. El texto ya se puede buscar.', 'success');
+  } catch (err) {
+    showToast(errorText(err), 'error');
+  }
+}
+
+function startAutoAI(ids) {
+  if (!ids || !ids.length || !state.config.ai_enabled || !state.config.has_api_key) return;
+  state.autoQueue.push(...ids.filter(Boolean));
+  if (!state.autoRunning) runAutoAIQueue();
+}
+
+async function runAutoAIQueue() {
+  state.autoRunning = true;
+  state.autoTotal = state.autoQueue.length;
+  state.autoDone = 0;
+  try {
+    while (state.autoQueue.length) {
+      const id = state.autoQueue.shift();
+      state.autoDone++;
+      setAIActivity(`IA: archivo ${state.autoDone}/${state.autoTotal}`);
+      try {
+        await processAutoFile(id);
+      } catch (err) {
+        console.error(err);
+        showToast('La IA no pudo completar un archivo: ' + errorText(err), 'error');
+      }
+    }
+  } finally {
+    state.autoRunning = false;
+    setAIActivity('');
+    await refreshData();
+    await loadList();
+  }
+}
+
+async function processAutoFile(id) {
+  let c = await call('GetConvenio', id);
+  if (!state.config.ai_enabled) return;
+  const necesitaTranscripcion = (c.es_escaneado && c.transcripcion_estado !== 'completa') ||
+    Number(c.paginas_por_transcribir || 0) > 0;
+  if (necesitaTranscripcion) {
+    await transcribeConvention(id, { auto: true });
+    c = await call('GetConvenio', id);
+  }
+  if (c.texto && c.texto.trim()) {
+    setAIActivity('IA: extrayendo datos…');
+    await call('ExtractAI', id);
+  }
+  if (state.current?.id === id) {
+    state.current = await call('GetConvenio', id);
+    renderDetail();
+  }
+  await refreshData();
+  await loadList();
+}
+
+async function transcribeConvention(id, options = {}) {
+  const auto = Boolean(options.auto);
+  if (state.transcribing) {
+    if (!auto) showToast('Ya hay una transcripción en curso.', 'info');
+    return;
+  }
+  if (!window.pdfjsLib) throw new Error('No se pudo cargar el motor de PDF para transcribir.');
+  if (!state.config.ai_enabled || !state.config.has_api_key) {
+    throw new Error('Activa la IA y configura la clave en Ajustes.');
+  }
+  let c = state.current?.id === id ? state.current : await call('GetConvenio', id);
+  let pdf;
+  let paginas = [];
+  try {
+    pdf = await window.pdfjsLib.getDocument({ url: `/pdf/${id}` }).promise;
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
@@ -865,16 +924,18 @@ async function transcribeCurrent() {
       if (chars < 30) paginas.push(i);
     }
     if (!paginas.length) {
-      showToast('No se encontraron páginas escaneadas para transcribir.', 'info');
+      if (!auto) showToast('No se encontraron páginas escaneadas para transcribir.', 'info');
       return;
     }
-    const ok = await confirmDialog(
-      'Transcribir páginas escaneadas',
-      `Se enviarán ${paginas.length} página${paginas.length === 1 ? '' : 's'} al servicio externo de IA. Puede tardar y generar costo en su proveedor. El texto se agregará a la búsqueda. ¿Continuar?`,
-      'Transcribir',
-      false
-    );
-    if (!ok) return;
+    if (options.confirm) {
+      const ok = await confirmDialog(
+        'Transcribir páginas escaneadas',
+        `Se enviarán ${paginas.length} página${paginas.length === 1 ? '' : 's'} al servicio externo de IA. Puede tardar y generar costo en su proveedor. El texto se agregará a la búsqueda. ¿Continuar?`,
+        'Transcribir',
+        false
+      );
+      if (!ok) return;
+    }
     await call('BeginTranscription', id, paginas.length);
     state.transcribing = id;
     if (state.current?.id === id) {
@@ -883,30 +944,43 @@ async function transcribeCurrent() {
       state.current.paginas_transcritas = 0;
       renderTranscription();
     }
-    for (const pageNumber of paginas) {
-      const page = await pdf.getPage(pageNumber);
-      const viewportBase = page.getViewport({ scale: 1 });
-      const scale = Math.min(1.6, 1800 / Math.max(viewportBase.width, viewportBase.height));
-      const viewport = page.getViewport({ scale: Math.max(scale, 0.8) });
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.ceil(viewport.width);
-      canvas.height = Math.ceil(viewport.height);
-      const ctx = canvas.getContext('2d', { alpha: false });
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      await page.render({ canvasContext: ctx, viewport }).promise;
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
-      const base64 = dataUrl.split(',')[1];
-      const status = await call('TranscribePage', id, pageNumber, base64);
-      if (state.current?.id === id) {
-        state.current.paginas_transcritas = status.paginas_transcritas;
-        state.current.paginas_por_transcribir = status.paginas_por_transcribir;
-        state.current.transcripcion_estado = status.estado;
-        if (status.texto) state.current.texto = status.texto;
-        renderTranscription();
-        renderAICard();
+    setAIActivity(`IA: transcribiendo 0/${paginas.length}`);
+    const cola = paginas.slice();
+    let failed = null;
+    const concurrency = Math.min(4, cola.length);
+    const worker = async () => {
+      while (cola.length && !failed) {
+        const pageNumber = cola.shift();
+        try {
+          const page = await pdf.getPage(pageNumber);
+          const viewportBase = page.getViewport({ scale: 1 });
+          const scale = Math.min(1.45, 1600 / Math.max(viewportBase.width, viewportBase.height));
+          const viewport = page.getViewport({ scale: Math.max(scale, 0.8) });
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          const ctx = canvas.getContext('2d', { alpha: false });
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          const base64 = canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
+          const status = await call('TranscribePage', id, pageNumber, base64);
+          if (state.current?.id === id) {
+            state.current.paginas_transcritas = status.paginas_transcritas;
+            state.current.paginas_por_transcribir = status.paginas_por_transcribir;
+            state.current.transcripcion_estado = status.estado;
+            if (status.texto) state.current.texto = status.texto;
+            renderTranscription();
+            renderAICard();
+          }
+          setAIActivity(`IA: transcribiendo ${status.paginas_transcritas}/${status.paginas_por_transcribir}`);
+        } catch (err) {
+          failed = err;
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: concurrency }, worker));
+    if (failed) throw failed;
     await call('FinishTranscription', id);
     if (state.current?.id === id) {
       state.current = await call('GetConvenio', id);
@@ -914,15 +988,15 @@ async function transcribeCurrent() {
     }
     await refreshData();
     await loadList();
-    showToast('Transcripción completada. El texto ya se puede buscar.', 'success');
   } catch (err) {
     try { await call('FailTranscription', id, errorText(err)); } catch (_) {}
     if (state.current?.id === id) {
       try { state.current = await call('GetConvenio', id); renderDetail(); } catch (_) {}
     }
-    showToast(errorText(err), 'error');
+    throw err;
   } finally {
     state.transcribing = null;
+    setAIActivity('');
     if (state.current?.id === id) renderTranscription();
   }
 }
@@ -1036,6 +1110,10 @@ async function confirmImport() {
     await loadList();
     if (ok > 0) showToast(`${ok} PDF importado${ok === 1 ? '' : 's'}. Completa los datos.`, 'success');
     if (errors.length) showToast(`${errors.length} archivo${errors.length === 1 ? '' : 's'} no se pudo importar.`, 'error');
+    if (ok > 0 && state.config.ai_enabled && state.config.has_api_key) {
+      showToast('La IA procesará automáticamente los archivos importados.', 'info');
+      startAutoAI(results.filter(r => !r.error).map(r => r.id));
+    }
     if (results.length === 1 && !errors.length) {
       $('#dialog-import').close();
       await openDetail(results[0].id);
@@ -1259,6 +1337,13 @@ function closeConfirm(value) {
     state.confirmResolve(Boolean(value));
     state.confirmResolve = null;
   }
+}
+
+function setAIActivity(text) {
+  const el = $('#ai-activity');
+  if (!el) return;
+  el.hidden = !text;
+  $('#ai-activity-text').textContent = text || '';
 }
 
 function showLoading(show) {

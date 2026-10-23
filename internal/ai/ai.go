@@ -70,8 +70,56 @@ func New(apiKey, baseURL, model, visionModel string) *Client {
 		BaseURL:     strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		Model:       strings.TrimSpace(model),
 		VisionModel: strings.TrimSpace(visionModel),
-		HTTP:        &http.Client{Timeout: 150 * time.Second},
+		HTTP:        &http.Client{Timeout: 180 * time.Second},
 	}
+}
+
+// chat hace una petición y devuelve el contenido y el motivo de finalización.
+// Permite reintentar con más tokens cuando el modelo de razonamiento se corta.
+func (c *Client) chat(ctx context.Context, body map[string]interface{}) (string, string, error) {
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", "", errors.New("el servicio de IA tardó demasiado en responder")
+		}
+		return "", "", errors.New("no se pudo conectar con el servicio de IA")
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "", "", errors.New("la clave de IA es inválida")
+		case http.StatusTooManyRequests:
+			return "", "", errors.New("se alcanzó el límite de uso de la IA; intente más tarde")
+		case http.StatusBadRequest:
+			return "", "", errors.New("el servicio rechazó la solicitud; si es una imagen, revise el modelo de visión en Ajustes")
+		default:
+			return "", "", fmt.Errorf("el servicio de IA respondió con error (%d)", resp.StatusCode)
+		}
+	}
+	var apiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(data, &apiResp); err != nil || len(apiResp.Choices) == 0 {
+		return "", "", errors.New("el servicio de IA devolvió una respuesta inesperada")
+	}
+	return apiResp.Choices[0].Message.Content, apiResp.Choices[0].FinishReason, nil
 }
 
 const systemPrompt = `Eres un asistente que extrae datos de convenios firmados por la Universidad Autónoma de Guerrero (UAGro), México.
@@ -130,54 +178,68 @@ func (c *Client) Extract(ctx context.Context, texto string, catalogo []Tag) (Ext
 			{"role": "user", "content": prompt},
 		},
 	}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return out, err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(payload))
-	if err != nil {
-		return out, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return out, errors.New("el servicio de IA tardó demasiado en responder")
+	var content, finish string
+	var err error
+	for _, limit := range []int{8000, 16000} {
+		body["max_tokens"] = limit
+		content, finish, err = c.chat(ctx, body)
+		if err != nil {
+			return out, err
 		}
-		return out, errors.New("no se pudo conectar con el servicio de IA")
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		switch resp.StatusCode {
-		case http.StatusUnauthorized, http.StatusForbidden:
-			return out, errors.New("la clave de IA es inválida")
-		case http.StatusTooManyRequests:
-			return out, errors.New("se alcanzó el límite de uso de la IA; intente más tarde")
-		default:
-			return out, fmt.Errorf("el servicio de IA respondió con error (%d)", resp.StatusCode)
+		if finish != "length" {
+			raw, err := parseJSON(content)
+			if err != nil {
+				return out, err
+			}
+			return interpret(raw, catalogo)
 		}
 	}
-	var apiResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
+	return out, errors.New("la extracción con IA se cortó por longitud incluso con más tokens; intente con un PDF más corto")
+}
+
+const answerPrompt = `Eres un asistente documental de la Universidad Autónoma de Guerrero.
+Responde la pregunta usando ÚNICAMENTE los fragmentos de convenios que recibirás.
+Reglas:
+- Responde en español, de forma clara y breve.
+- Cada afirmación debe llevar una cita con el formato [Convenio #N, página P].
+- Si los fragmentos no alcanzan para responder, dilo explícitamente y no inventes.
+- No des asesoría legal definitiva; presenta la información como apoyo para revisión humana.
+- No repitas los fragmentos completos; sintetiza.`
+
+// Answer responde una pregunta con base en fragmentos recuperados.
+func (c *Client) Answer(ctx context.Context, question, contexto string) (string, error) {
+	if c.APIKey == "" {
+		return "", errors.New("no hay una clave de IA configurada")
 	}
-	if err := json.Unmarshal(data, &apiResp); err != nil || len(apiResp.Choices) == 0 {
-		return out, errors.New("el servicio de IA devolvió una respuesta inesperada")
+	if strings.TrimSpace(contexto) == "" {
+		return "", errors.New("no se encontraron fragmentos relevantes")
 	}
-	if apiResp.Choices[0].FinishReason == "length" {
-		return out, errors.New("la respuesta de la IA se cortó; intente de nuevo")
+	body := map[string]interface{}{
+		"model":       c.Model,
+		"temperature": 0.1,
+		"max_tokens":  1600,
+		"messages": []map[string]string{
+			{"role": "system", "content": answerPrompt},
+			{"role": "user", "content": "Pregunta:\n" + question + "\n\nFragmentos:\n<<<\n" + contexto + "\n>>>"},
+		},
 	}
-	raw, err := parseJSON(apiResp.Choices[0].Message.Content)
-	if err != nil {
-		return out, err
+	var content, finish string
+	var err error
+	for _, limit := range []int{4000, 8000} {
+		body["max_tokens"] = limit
+		content, finish, err = c.chat(ctx, body)
+		if err != nil {
+			return "", err
+		}
+		if finish != "length" {
+			texto := strings.TrimSpace(content)
+			if texto == "" {
+				return "", errors.New("el servicio de IA devolvió una respuesta vacía")
+			}
+			return texto, nil
+		}
 	}
-	return interpret(raw, catalogo)
+	return "", errors.New("la respuesta se cortó por longitud; intenta una pregunta más específica")
 }
 
 const transcriptionPrompt = `Eres un transcriptor de documentos. La imagen es una página escaneada de un convenio de la Universidad Autónoma de Guerrero (UAGro), México.
@@ -199,9 +261,10 @@ func (c *Client) TranscribeImage(ctx context.Context, imageBase64 string, page i
 		return "", errors.New("la página no tiene imagen para transcribir")
 	}
 	body := map[string]interface{}{
-		"model":       c.VisionModel,
-		"temperature": 0.0,
-		"max_tokens":  4000,
+		"model":            c.VisionModel,
+		"temperature":      0.0,
+		"max_tokens":       16000,
+		"reasoning_effort": "low",
 		"messages": []map[string]interface{}{
 			{"role": "system", "content": transcriptionPrompt},
 			{"role": "user", "content": []map[string]interface{}{
@@ -212,60 +275,27 @@ func (c *Client) TranscribeImage(ctx context.Context, imageBase64 string, page i
 			}},
 		},
 	}
-	payload, err := json.Marshal(body)
-	if err != nil {
-		return "", err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(payload))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return "", errors.New("el servicio de transcripción tardó demasiado en responder")
+	var content, finish string
+	var err error
+	for _, limit := range []int{16000, 32000} {
+		body["max_tokens"] = limit
+		content, finish, err = c.chat(ctx, body)
+		if err != nil {
+			return "", err
 		}
-		return "", errors.New("no se pudo conectar con el servicio de transcripción")
-	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		switch resp.StatusCode {
-		case http.StatusUnauthorized, http.StatusForbidden:
-			return "", errors.New("la clave de IA es inválida")
-		case http.StatusTooManyRequests:
-			return "", errors.New("se alcanzó el límite de uso de la IA; intente más tarde")
-		case http.StatusBadRequest:
-			return "", errors.New("el modelo configurado no aceptó la imagen; revise el modelo de visión en Ajustes")
-		default:
-			return "", fmt.Errorf("el servicio de transcripción respondió con error (%d)", resp.StatusCode)
+		if finish != "length" {
+			texto := strings.TrimSpace(content)
+			texto = strings.TrimPrefix(texto, "```text")
+			texto = strings.TrimPrefix(texto, "```")
+			texto = strings.TrimSuffix(texto, "```")
+			texto = strings.TrimSpace(texto)
+			if texto == "" {
+				return "", errors.New("el servicio de transcripción devolvió texto vacío")
+			}
+			return texto, nil
 		}
 	}
-	var apiResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(data, &apiResp); err != nil || len(apiResp.Choices) == 0 {
-		return "", errors.New("el servicio de transcripción devolvió una respuesta inesperada")
-	}
-	if apiResp.Choices[0].FinishReason == "length" {
-		return "", errors.New("la transcripción se cortó por longitud; intente de nuevo")
-	}
-	texto := strings.TrimSpace(apiResp.Choices[0].Message.Content)
-	texto = strings.TrimPrefix(texto, "```text")
-	texto = strings.TrimPrefix(texto, "```")
-	texto = strings.TrimSuffix(texto, "```")
-	texto = strings.TrimSpace(texto)
-	if texto == "" {
-		return "", errors.New("el servicio de transcripción devolvió texto vacío")
-	}
-	return texto, nil
+	return "", errors.New("la transcripción se cortó por longitud incluso con más tokens; intente de nuevo")
 }
 
 func catalogText(tags []Tag) string {

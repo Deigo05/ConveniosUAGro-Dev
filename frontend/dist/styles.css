@@ -357,6 +357,8 @@ hr { border: 0; border-top: 1px solid var(--borde); margin: 17px 0 13px; }
 .toast--info { background: #213a64; }
 .toast span { flex: 1; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.ai-activity { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--azul-claro); color: var(--azul); font-size: .72rem; font-weight: 700; white-space: nowrap; }
+.ai-activity .spinner { width: 12px; height: 12px; border-width: 2px; }
 .loading { position: fixed; inset: 0; z-index: 40; display: flex; align-items: center; justify-content: center; gap: 10px; background: rgba(244,246,250,.72); backdrop-filter: blur(2px); color: var(--azul-oscuro); font-weight: 700; font-size: .9rem; }
 .spinner { width: 20px; height: 20px; border: 2px solid #c8d4e8; border-top-color: var(--azul-medio); border-radius: 50%; animation: spin .75s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

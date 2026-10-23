@@ -1,4 +1,4 @@
-CONVENIOS UAGRO · 1.1.0
+CONVENIOS UAGRO · 1.1.1
 Aplicación de escritorio para gestionar convenios
 
 QUÉ ES
@@ -30,6 +30,10 @@ La clave de IA se guarda solo en este equipo. Si no configuras IA, todas las fun
 RESPALDO
 En Ajustes → "Crear respaldo ZIP" se genera un archivo con la base y los PDF.
 Para restaurar: cierra la aplicación, descomprime el respaldo y copia convenios.db y la carpeta pdfs\ dentro de %APPDATA%\ConveniosUAGro\, reemplazando lo anterior.
+
+AUTOMATIZACIÓN AL IMPORTAR
+- Si la IA está activa, al confirmar la subida comienzan automáticamente la extracción y la transcripción.
+- La transcripción procesa hasta 4 páginas en paralelo y reintenta con más tokens si se corta.
 
 TRANSCRIPCIÓN DE ESCANEADOS
 - En la ficha de un PDF escaneado aparece "Transcribir páginas escaneadas".

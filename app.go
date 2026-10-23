@@ -24,7 +24,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.1.0"
+const appVersion = "1.1.1"
 
 // App es el puente entre la interfaz y la base local.
 type App struct {
