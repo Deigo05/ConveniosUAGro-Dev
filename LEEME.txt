@@ -1,4 +1,4 @@
-CONVENIOS UAGRO · 1.1.0
+CONVENIOS UAGRO · 1.2.0
 Aplicación de escritorio para gestionar convenios
 
 QUÉ ES
@@ -30,6 +30,13 @@ La clave de IA se guarda solo en este equipo. Si no configuras IA, todas las fun
 RESPALDO
 En Ajustes → "Crear respaldo ZIP" se genera un archivo con la base y los PDF.
 Para restaurar: cierra la aplicación, descomprime el respaldo y copia convenios.db y la carpeta pdfs\ dentro de %APPDATA%\ConveniosUAGro\, reemplazando lo anterior.
+
+RADAR, CONVENIOS HERMANOS Y PREGUNTAS
+- Radar muestra qué expedientes tienen riesgo alto, medio o bajo y por qué.
+- Asigna un responsable interno para reducir alertas.
+- En la ficha aparecen convenios hermanos con la misma contraparte, etiquetas o vigencias.
+- En "Preguntar" puedes hacer preguntas en lenguaje natural; la respuesta incluye fuentes por convenio y página.
+- El asistente es apoyo documental, no asesoría legal.
 
 TRANSCRIPCIÓN DE ESCANEADOS
 - En la ficha de un PDF escaneado aparece "Transcribir páginas escaneadas".

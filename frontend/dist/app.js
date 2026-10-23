@@ -22,6 +22,10 @@ const state = {
   result: { items: [], total: 0, total_registrados: 0, page: 1, pages: 1 },
   selected: new Set(),
   current: null,
+  related: [],
+  radar: null,
+  askResult: null,
+  askBusy: false,
   pendingFiles: [],
   transcribing: null,
   confirmResolve: null,
@@ -70,6 +74,15 @@ function bindEvents() {
   $('#btn-settings-top').addEventListener('click', () => showView('ajustes'));
   $('#btn-import-top').addEventListener('click', openImport);
   $('#btn-import-confirm').addEventListener('click', confirmImport);
+  $('#btn-ask').addEventListener('click', askQuestion);
+  $('#radar-ask').addEventListener('click', () => showView('preguntar'));
+  $('#ask-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askQuestion(); }
+  });
+  $('#ask-examples').addEventListener('click', e => {
+    const btn = e.target.closest('[data-ask]');
+    if (btn) { $('#ask-input').value = btn.dataset.ask; askQuestion(); }
+  });
 
   $('#search').addEventListener('input', onSearch);
   $('#btn-search-clear').addEventListener('click', () => {
@@ -102,6 +115,28 @@ function bindEvents() {
 
   $('#detail-back').addEventListener('click', () => showView('convenios'));
   $('#form-edit').addEventListener('submit', saveConvenio);
+  $('#related-card').addEventListener('click', e => {
+    const item = e.target.closest('[data-related-id]');
+    if (item) openDetail(Number(item.dataset.relatedId));
+  });
+  $('#radar-items').addEventListener('click', e => {
+    const item = e.target.closest('[data-radar-id]');
+    if (item) openDetail(Number(item.dataset.radarId));
+  });
+  $('#radar-groups').addEventListener('click', e => {
+    const btn = e.target.closest('[data-group-query]');
+    if (btn) {
+      state.filters = { query: btn.dataset.groupQuery, tag_ids: [], vigencia: '', solo_pendientes: false, order: 'id', dir: 'desc', page: 1 };
+      $('#search').value = state.filters.query;
+      showView('convenios');
+      updateClearFilters();
+      loadList();
+    }
+  });
+  $('#ask-sources').addEventListener('click', e => {
+    const source = e.target.closest('[data-source-id]');
+    if (source) openDetail(Number(source.dataset.sourceId));
+  });
   $('#btn-download').addEventListener('click', downloadCurrent);
   $('#btn-delete').addEventListener('click', deleteCurrent);
   $('#f-indefinida').addEventListener('change', syncIndefinite);
@@ -193,6 +228,19 @@ function renderStats() {
   $('#pending-count').textContent = pendientes;
   $('#btn-pending').hidden = pendientes === 0 && !state.filters.solo_pendientes;
   $('#btn-pending').classList.toggle('is-active', Boolean(state.filters.solo_pendientes));
+  refreshRadarBadge();
+}
+
+async function refreshRadarBadge() {
+  try {
+    const r = await call('GetRadar');
+    state.radar = r;
+    const n = (r.alto || 0) + (r.medio || 0);
+    $('#radar-count').textContent = n;
+    $('#radar-count').hidden = n === 0;
+  } catch (_) {
+    $('#radar-count').hidden = true;
+  }
 }
 
 async function loadList() {
@@ -368,6 +416,7 @@ function rowHTML(c) {
   if (state.config.ai_enabled && (c.ia_estado === 'error' || c.ia_estado === 'omitido') && !c.etiquetas_revisadas) {
     // "omitido" es lo normal en captura manual; no lo mostramos como error.
   }
+  if (c.riesgo && c.riesgo.nivel) badges.push(riskBadge(c.riesgo));
   if (!c.etiquetas_revisadas) badges.push('<span class="badge badge--amber">Etiquetas pendientes</span>');
   if (c.transcripcion_estado === 'en_proceso') {
     badges.push('<span class="badge badge--blue">Transcribiendo…</span>');
@@ -398,6 +447,12 @@ function rowHTML(c) {
   </tr>`;
 }
 
+function riskBadge(riesgo) {
+  const nivel = riesgo?.nivel || 'bajo';
+  const label = nivel === 'alto' ? 'Riesgo alto' : nivel === 'medio' ? 'Riesgo medio' : 'Riesgo bajo';
+  return `<span class="risk risk--${nivel}" title="Puntaje de riesgo: ${riesgo?.puntaje || 0}">${label}</span>`;
+}
+
 function stateBadge(estado) {
   const map = {
     vigente: ['Vigente', 'badge--green'],
@@ -425,6 +480,111 @@ function renderPagination() {
   nav.innerHTML = `<button class="btn btn--outline btn--small" data-page="${r.page - 1}" ${r.page <= 1 ? 'disabled' : ''}>← Anterior</button>
     <span>Página ${r.page} de ${r.pages}</span>
     <button class="btn btn--outline btn--small" data-page="${r.page + 1}" ${r.page >= r.pages ? 'disabled' : ''}>Siguiente →</button>`;
+}
+
+async function askQuestion() {
+  const question = $('#ask-input').value.trim();
+  if (!question) { $('#ask-input').focus(); return; }
+  if (!state.config.ai_enabled || !state.config.has_api_key) {
+    showToast('Activa la IA y configura la clave en Ajustes.', 'error');
+    showView('ajustes');
+    return;
+  }
+  if (state.askBusy) return;
+  state.askBusy = true;
+  setButtonBusy($('#btn-ask'), true, 'Buscando…');
+  $('#ask-status').textContent = 'Buscando en los convenios y redactando…';
+  $('#ask-answer-card').hidden = true;
+  try {
+    const result = await call('AskAI', question);
+    state.askResult = result;
+    renderAsk();
+    showView('preguntar');
+  } catch (err) {
+    $('#ask-status').textContent = '';
+    showToast(errorText(err), 'error');
+  } finally {
+    state.askBusy = false;
+    setButtonBusy($('#btn-ask'), false, 'Preguntar');
+  }
+}
+
+function renderAsk() {
+  const card = $('#ask-answer-card');
+  const result = state.askResult;
+  if (!result) { card.hidden = true; return; }
+  card.hidden = false;
+  $('#ask-answer').textContent = result.respuesta || '';
+  const fuentes = result.fuentes || [];
+  $('#ask-sources').innerHTML = fuentes.length ? fuentes.map(s => `
+    <div class="source-card" data-source-id="${s.convenio_id}">
+      <div class="source-card__head">
+        <strong>${esc(s.dependencia || 'Convenio #' + s.convenio_id)}</strong>
+        <span>${s.pagina ? 'Página ' + s.pagina : 'Sin página'}${s.tipo ? ' · ' + esc(s.tipo) : ''}</span>
+      </div>
+      <p>${esc(s.fragmento || '')}</p>
+      <span class="source-card__open">Abrir convenio →</span>
+    </div>`).join('') : '<p class="muted">No hay fuentes para mostrar.</p>';
+  if (!state.config.ai_enabled || !state.config.has_api_key) {
+    $('#ask-status').textContent = 'Configura la IA en Ajustes para usar el asistente.';
+  } else {
+    $('#ask-status').textContent = '';
+  }
+}
+
+async function loadRadar() {
+  try {
+    const r = await call('GetRadar');
+    state.radar = r;
+    renderRadar();
+    const n = (r.alto || 0) + (r.medio || 0);
+    $('#radar-count').textContent = n;
+    $('#radar-count').hidden = n === 0;
+  } catch (err) {
+    showToast(errorText(err), 'error');
+    $('#radar-items').innerHTML = `<div class="empty-state empty-filter"><h2>No se pudo cargar el radar</h2><p>${esc(errorText(err))}</p></div>`;
+  }
+}
+
+function renderRadar() {
+  const r = state.radar || {};
+  $('#radar-alto').textContent = r.alto || 0;
+  $('#radar-medio').textContent = r.medio || 0;
+  $('#radar-sin-responsable').textContent = r.sin_responsable || 0;
+  $('#radar-sin-transcribir').textContent = r.sin_transcribir || 0;
+  $('#radar-total').textContent = r.total || 0;
+  const items = r.items || [];
+  if (!items.length) {
+    $('#radar-items').innerHTML = `<div class="empty-state empty-filter"><h2>Sin convenios todavía</h2><p>Importa un PDF para empezar a calcular riesgos.</p></div>`;
+  } else {
+    $('#radar-items').innerHTML = items.map(c => `
+      <div class="radar-item" data-radar-id="${c.id}">
+        <span>${riskBadge(c.riesgo)}</span>
+        <div class="radar-item__main">
+          <div class="radar-item__name">${esc(c.dependencia || 'Sin contraparte capturada')}</div>
+          <div class="radar-item__meta">${c.responsable ? 'Responsable: ' + esc(c.responsable) : 'Sin responsable'} · ${dateOrDash(c.fecha_vigencia, c.vigencia_indefinida)}</div>
+          <div class="radar-item__motives">${(c.riesgo?.motivos || []).slice(0, 3).map(m => `<span>${esc(m)}</span>`).join('')}</div>
+        </div>
+        <span class="radar-item__score">${c.riesgo?.puntaje || 0} pts</span>
+      </div>`).join('');
+  }
+  const groups = r.contrapartes || [];
+  if (!groups.length) {
+    $('#radar-groups').innerHTML = `<p class="muted">No hay contrapartes repetidas.</p>`;
+  } else {
+    $('#radar-groups').innerHTML = groups.map(g => `
+      <div class="counterparty-item">
+        <div class="counterparty-item__name" title="${esc(g.dependencia)}">${esc(g.dependencia)}</div>
+        <span class="badge">${g.total} convenios</span>
+        ${g.vencidos ? `<span class="badge badge--red">${g.vencidos} vencidos</span>` : ''}
+        <button class="btn btn--text btn--small" data-group-query="${esc(g.dependencia)}">Ver</button>
+      </div>`).join('');
+  }
+}
+
+function dateOrDash(fecha, indefinida) {
+  if (indefinida) return 'Vigencia indefinida';
+  return formatDate(fecha) || 'Sin fecha';
 }
 
 function onPagination(e) {
@@ -517,8 +677,12 @@ async function bulkDelete() {
 async function openDetail(id) {
   showLoading(true);
   try {
-    const c = await call('GetConvenio', id);
+    const [c, related] = await Promise.all([
+      call('GetConvenio', id),
+      call('GetRelated', id).catch(() => [])
+    ]);
     state.current = c;
+    state.related = related || [];
     renderDetail();
     showView('detalle');
   } catch (err) {
@@ -540,6 +704,7 @@ function renderDetail() {
   $('#pdf-frame').src = `/pdf/${c.id}?v=${Date.now()}`;
 
   $('#f-dependencia').value = c.dependencia || '';
+  $('#f-responsable').value = c.responsable || '';
   $('#f-firma').value = c.fecha_firma || '';
   $('#f-vigencia').value = c.fecha_vigencia || '';
   $('#f-vigencia-texto').value = c.vigencia_texto || '';
@@ -557,7 +722,41 @@ function renderDetail() {
   renderAIBanner();
   renderAICard();
   renderTranscription();
+  renderRisk();
+  renderRelated();
   renderDetailMeta();
+}
+
+function renderRisk() {
+  const c = state.current;
+  const box = $('#detail-risk');
+  if (!c || !c.riesgo) { box.hidden = true; return; }
+  box.hidden = false;
+  box.className = 'detail-risk detail-risk--' + (c.riesgo.nivel || 'bajo');
+  $('#risk-badge').outerHTML = riskBadge(c.riesgo).replace('<span ', '<span id="risk-badge" ');
+  const labels = { alto: 'Riesgo alto', medio: 'Riesgo medio', bajo: 'Riesgo bajo' };
+  $('#risk-title').textContent = labels[c.riesgo.nivel] || 'Riesgo del expediente';
+  $('#risk-score').textContent = `Puntaje ${c.riesgo.puntaje || 0}`;
+  const motivos = c.riesgo.motivos || [];
+  $('#risk-motives').innerHTML = motivos.length
+    ? motivos.map(m => `<span>${esc(m)}</span>`).join('')
+    : '<span>Sin alertas de expediente</span>';
+}
+
+function renderRelated() {
+  const card = $('#related-card');
+  const items = state.related || [];
+  card.hidden = !items.length;
+  if (!items.length) return;
+  $('#related-count').textContent = items.length;
+  $('#related-list').innerHTML = items.map(c => `
+    <div class="related-item" data-related-id="${c.id}">
+      <div class="related-item__body">
+        <div class="related-item__name">${esc(c.dependencia || 'Sin contraparte')} ${riskBadge(c.riesgo)}</div>
+        <div class="related-item__reasons">${(c.motivos || []).map(m => `<span>${esc(m)}</span>`).join('')}</div>
+      </div>
+      <span class="related-item__score">${c.score} pts</span>
+    </div>`).join('');
 }
 
 function renderDetailMeta() {
@@ -648,6 +847,7 @@ async function saveConvenio(e) {
   const in_ = {
     id: c.id,
     dependencia: $('#f-dependencia').value.trim(),
+    responsable: $('#f-responsable').value.trim(),
     fecha_firma: $('#f-firma').value,
     fecha_vigencia: $('#f-indefinida').checked ? '' : $('#f-vigencia').value,
     vigencia_indefinida: $('#f-indefinida').checked,
@@ -1051,12 +1251,14 @@ async function confirmImport() {
 function showView(view) {
   state.view = view;
   $$('.view').forEach(v => v.hidden = true);
-  const map = { convenios: 'view-convenios', detalle: 'view-detail', etiquetas: 'view-tags', ajustes: 'view-settings' };
+  const map = { convenios: 'view-convenios', detalle: 'view-detail', radar: 'view-radar', preguntar: 'view-preguntar', etiquetas: 'view-tags', ajustes: 'view-settings' };
   $('#' + (map[view] || 'view-convenios')).hidden = false;
   $$('.nav__item').forEach(b => b.classList.toggle('is-active', b.dataset.view === view || (view === 'detalle' && b.dataset.view === 'convenios')));
   const titles = {
     convenios: ['Convenios', 'Administra y consulta los convenios de la UAGro.'],
     detalle: ['Ficha del convenio', 'Revisa el documento, los datos y las etiquetas.'],
+    radar: ['Radar de riesgo', 'Prioriza expedientes y detecta contrapartes repetidas.'],
+    preguntar: ['Preguntar', 'Consulta los convenios con respuestas y fuentes.'],
     etiquetas: ['Etiquetas', 'Catálogo local para clasificar los convenios.'],
     ajustes: ['Ajustes', 'Configuración local de la aplicación.']
   };
@@ -1064,6 +1266,8 @@ function showView(view) {
   $('#page-title').textContent = title;
   $('#page-subtitle').textContent = sub;
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (view === 'radar') loadRadar();
+  if (view === 'preguntar') renderAsk();
   if (view === 'etiquetas') renderTagsView();
   if (view === 'ajustes') renderSettings();
 }

@@ -30,6 +30,9 @@ No hay que instalar un servidor ni iniciar sesión. Todo funciona en la PC.
 - Selección múltiple y eliminación en lote.
 - Visor de PDF integrado y **descarga del PDF** con diálogo Guardar como.
 - **Transcripción de páginas escaneadas** con el modelo de visión del servicio externo; el texto se guarda por página y se integra a la búsqueda.
+- **Radar de riesgo** con semáforo alto, medio y bajo, responsables y expedientes incompletos.
+- **Convenios hermanos** por contraparte, etiquetas y vigencias relacionadas.
+- **Preguntas en lenguaje natural** con respuesta y fuentes por convenio y página.
 - Respaldo completo en un archivo ZIP (base de datos + PDF).
 - Análisis opcional con IA para extraer dependencia, fechas y etiquetas desde PDF con texto.
 - Filtro para clasificar los convenios que aún no tienen etiquetas.
@@ -107,6 +110,7 @@ build/appicon.png          Icono de la aplicación
 - No hay usuarios ni permisos: es una aplicación personal.
 - No hay OCR local: la transcripción usa el modelo de visión externo y requiere clave/API.
 - La transcripción se ejecuta desde la interfaz; si se cierra la app se detiene, aunque las páginas ya procesadas se conservan.
+- El asistente de preguntas es apoyo documental, no asesoría legal; revisa las fuentes citadas.
 - La IA es opcional y depende de un servicio externo; su disponibilidad y costo no dependen de esta aplicación.
 - El PDF se muestra con el visor de WebView2; en equipos sin WebView2 hay que instalarlo.
 - El formato visible de los campos `date` depende del idioma de Windows (el valor guardado siempre es ISO `AAAA-MM-DD`).
@@ -125,6 +129,6 @@ Para restaurar:
 
 ## Estado de la entrega
 
-- Versión: 1.1.0
+- Versión: 1.2.0
 - Base inicial: vacía (solo se crean las etiquetas base Nacional/Internacional y los 32 estados).
 - Sin datos de producción ni credenciales.

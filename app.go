@@ -24,7 +24,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.1.0"
+const appVersion = "1.2.0"
 
 // App es el puente entre la interfaz y la base local.
 type App struct {
@@ -117,6 +117,48 @@ func (a *App) ListConvenios(f store.ListFilter) (store.ListResult, error) {
 // GetConvenio devuelve la ficha completa.
 func (a *App) GetConvenio(id int64) (store.ConventionDetail, error) {
 	return a.store.Get(id)
+}
+
+// GetRadar devuelve el tablero de riesgos y contrapartes repetidas.
+func (a *App) GetRadar() (store.RadarResult, error) {
+	return a.store.Radar()
+}
+
+// GetRelated devuelve los convenios hermanos de una ficha.
+func (a *App) GetRelated(id int64) ([]store.RelatedConvention, error) {
+	return a.store.Related(id)
+}
+
+// AskAI responde una pregunta con fragmentos y fuentes de los convenios.
+func (a *App) AskAI(question string) (store.AskResult, error) {
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return store.AskResult{}, errors.New("escribe una pregunta")
+	}
+	a.cfgMu.Lock()
+	cfg := a.cfg
+	a.cfgMu.Unlock()
+	if !cfg.AIEnabled {
+		return store.AskResult{}, errors.New("active el análisis con IA en Ajustes")
+	}
+	if cfg.APIKey == "" {
+		return store.AskResult{}, errors.New("configure una clave de IA en Ajustes")
+	}
+	contexto, fuentes, err := a.store.PrepareAsk(question, 8)
+	if err != nil {
+		return store.AskResult{}, err
+	}
+	if len(fuentes) == 0 {
+		return store.AskResult{Respuesta: "No encontré fragmentos de convenios relacionados con esa pregunta. Prueba con otras palabras o importa/transcribe más documentos.", Fuentes: []store.AskSource{}}, nil
+	}
+	client := ai.New(cfg.APIKey, cfg.BaseURL, cfg.Model, cfg.VisionModel)
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+	defer cancel()
+	respuesta, err := client.Answer(ctx, question, contexto)
+	if err != nil {
+		return store.AskResult{}, err
+	}
+	return store.AskResult{Respuesta: respuesta, Fuentes: fuentes}, nil
 }
 
 // SaveConvenio guarda la captura manual.

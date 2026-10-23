@@ -69,3 +69,39 @@ func TestTranscribePagePipeline(t *testing.T) {
 		t.Fatalf("la transcripción no entró a FTS: %d", res.Total)
 	}
 }
+
+func TestAskAIPipeline(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"choices":[{"message":{"content":"Hay un convenio en Acapulco [Convenio #1, página 1]."},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	t.Setenv("CONVENIOS_DATA_DIR", dir)
+	paths, err := store.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	id, err := st.Insert(pdfutil.SavedFile{
+		NombreGuardado: "ffffffffffffffffffffffffffffffff.pdf", NombreOriginal: "ask.pdf",
+		Paginas: 1, PaginasTexto: []string{"Convenio de colaboración con el Ayuntamiento de Acapulco."},
+		Texto: "Convenio de colaboración con el Ayuntamiento de Acapulco.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = id
+	a := &App{store: st, paths: paths, cfg: config.Config{AIEnabled: true, APIKey: "test-key", BaseURL: srv.URL, Model: "text", VisionModel: "vision"}}
+	res, err := a.AskAI("¿Qué convenio hay en Acapulco?")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fuentes) == 0 || !strings.Contains(res.Respuesta, "Acapulco") {
+		t.Fatalf("respuesta = %+v", res)
+	}
+}

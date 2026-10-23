@@ -11,7 +11,7 @@
 node_modules/
 frontend/node_modules/
 
-# Datos de la aplicaci??n y secretos
+# Datos de la aplicación y secretos
 data/
 *.db
 *.db-wal

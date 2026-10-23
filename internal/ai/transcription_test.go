@@ -42,3 +42,23 @@ func TestTranscribeImageRequest(t *testing.T) {
 		t.Fatalf("no se envió la imagen: %s", raw)
 	}
 }
+
+func TestAnswerRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "Convenio #3") {
+			t.Errorf("no se enviaron las fuentes")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"choices":[{"message":{"content":"Respuesta con cita [Convenio #3, página 2]."},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+	client := New("test-key", srv.URL, "text-model", "vision-model")
+	got, err := client.Answer(context.Background(), "¿Qué dice?", "[Convenio #3 | Página 2] texto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "Convenio #3") {
+		t.Fatalf("respuesta = %q", got)
+	}
+}

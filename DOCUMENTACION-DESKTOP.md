@@ -1,6 +1,6 @@
 # Convenios UAGro Desktop — Documentación técnica
 
-**Versión:** 1.1.0  
+**Versión:** 1.2.0  
 **Estado:** aplicación Windows compilada, probada y entregada en la PC.  
 **Base inicial:** vacía (se crean solo las etiquetas base al primer arranque).
 
@@ -19,6 +19,9 @@ Aplicación de escritorio local para registrar, buscar, clasificar y descargar l
 - IA opcional (DeepSeek/OpenAI-compatible) para extraer datos de PDF con texto.
 - Transcripción de páginas escaneadas con un modelo de visión; el texto por página se guarda en SQLite y se integra a FTS5.
 - Filtro de clasificación pendiente para revisar etiquetas.
+- **Radar de riesgo** con semáforo alto/medio/bajo y motivos.
+- Detección de **convenios hermanos** por contraparte, etiquetas y vigencias.
+- **Preguntas en lenguaje natural** con fuentes por convenio y página.
 
 No hay login, usuarios, servidor propio ni datos de ejemplo.
 
@@ -49,6 +52,9 @@ convenios-desktop/
 │   │   ├── types.go           structs de la API
 │   │   ├── tags.go            catálogo, asignación, sugerencias
 │   │   ├── conventions.go     CRUD, filtros, FTS, vigencias, borrado
+│   │   ├── risk.go            semáforo de riesgo
+│   │   ├── related.go         radar y convenios hermanos
+│   │   ├── ask.go             recuperación de fragmentos y fuentes
 │   │   ├── transcription.go   páginas transcritas y reconstrucción de texto
 │   │   └── backup.go          respaldo ZIP (base + PDF)
 │   ├── pdfutil/pdf.go         validación, copia, texto, exportación
@@ -83,12 +89,13 @@ La variable `CONVENIOS_DATA_DIR` permite usar otra carpeta (pruebas). El ejecuta
 
 ### Esquema
 
-- `convenios`: datos, archivo, `texto_pdf` original, `texto` final, estado IA, sugerencias, clasificación, estado de transcripción y fechas.
+- `convenios`: datos, `responsable`, archivo, `texto_pdf` original, `texto` final, estado IA, sugerencias, clasificación, estado de transcripción y fechas.
 - `etiquetas`: `ambito`, `estado`, `ciudad`, `tema`; `protegida` para las base.
 - `convenio_etiquetas`: N:M con cascada.
-- `transcripcion_paginas`: texto por página, PK `(convenio_id, pagina)`.
+- `pdf_paginas`: texto original por página, PK `(convenio_id, pagina)`.
+- `transcripcion_paginas`: texto transcrito por página, PK `(convenio_id, pagina)`.
 - `convenios_fts`: FTS5 sobre dependencia, archivo, notas y texto, con triggers.
-- `PRAGMA user_version = 2`. La migración v1→v2 agrega `texto_pdf`, el estado de transcripción y `transcripcion_paginas`.
+- `PRAGMA user_version = 3`. La migración v1→v3 agrega `texto_pdf`, el estado de transcripción, `responsable`, `pdf_paginas` y `transcripcion_paginas`.
 
 Las etiquetas base son:
 
@@ -122,6 +129,9 @@ El frontend llama `window.go.main.App.<Método>`.
 | `GetBootstrap` | Etiquetas, stats, configuración y datos de la app |
 | `ListConvenios(filter)` | Búsqueda, etiquetas, vigencia, orden y página |
 | `GetConvenio(id)` | Ficha completa + sugerencias |
+| `GetRadar()` | Semáforo, prioridades y contrapartes repetidas |
+| `GetRelated(id)` | Convenios hermanos con puntaje y motivos |
+| `AskAI(question)` | Respuesta con fuentes por convenio y página |
 | `SaveConvenio(input)` | Guardar captura manual |
 | `ChoosePDFs()` | Diálogo nativo de PDF |
 | `ImportPDFs(paths)` | Copiar/registrar PDF y extraer texto |
@@ -149,7 +159,9 @@ El servidor de assets de Wails incluye un middleware para `/pdf/<id>`; solo acep
 `frontend/dist/index.html` contiene las vistas:
 
 - `#view-convenios`: stats, búsqueda, filtros, tabla y lote.
-- `#view-detail`: PDF, formulario, etiquetas, sugerencias, IA.
+- `#view-detail`: PDF, formulario, riesgo, etiquetas, hermanos, transcripción e IA.
+- `#view-radar`: semáforo y contrapartes repetidas.
+- `#view-preguntar`: pregunta, respuesta y fuentes.
 - `#view-tags`: catálogo y creación/edición.
 - `#view-settings`: IA, clave, carpeta y respaldo.
 
@@ -162,6 +174,9 @@ El servidor de assets de Wails incluye un middleware para `/pdf/<id>`; solo acep
 - `downloadPDF()`.
 - `renderTagFilter()`, `renderTagSelector()`.
 - `renderTranscription()` / `transcribeCurrent()`: PDF.js detecta páginas sin texto, las renderiza a JPEG y las envía una por una.
+- `loadRadar()` / `renderRadar()`: semáforo y contrapartes.
+- `renderRisk()` / `renderRelated()`: ficha del convenio.
+- `askQuestion()` / `renderAsk()`: pregunta y fuentes.
 - `confirmDialog()`, `showToast()`, `showLoading()`.
 
 Los estilos están en `styles.css`; no hay dependencias externas ni CDN. PDF.js se sirve localmente desde `vendor/`.
@@ -189,7 +204,40 @@ Los estilos están en `styles.css`; no hay dependencias externas ni CDN. PDF.js 
 
 La clave se guarda en `settings.json`; la UI solo devuelve una pista (`has_api_key`, `api_key_hint`).
 
-## 8. PDF
+## 8. Radar, convenios hermanos y preguntas
+
+### Semáforo de riesgo
+
+`EvaluateRisk` suma puntos por:
+
+- vencido (+50), por vencer (+30), sin fecha (+15),
+- sin responsable (+20), sin contraparte (+15), sin etiquetas (+10),
+- PDF escaneado sin transcripción (+15), con error (+18), en proceso (+8),
+- sin fecha de firma (+10), sin fecha de término (+5).
+
+`alto` desde 50, `medio` desde 25 y `bajo` por debajo. El radar muestra los 40 expedientes con mayor puntaje y las contrapartes con más de un convenio.
+
+### Convenios hermanos
+
+`Related` puntúa contra los demás convenios:
+
+- misma contraparte normalizada (+60) o nombre muy parecido (+30),
+- etiquetas compartidas (estado +15, ciudad +10, tema +5, ámbito +3),
+- vigencias traslapadas (+15).
+
+Se muestran hasta 8 con sus motivos y se pueden abrir desde la ficha.
+
+### Preguntas con fuentes
+
+`PrepareAsk` recupera convenios con FTS5 y, si no hay coincidencias, los más recientes. Para cada uno lee `pdf_paginas` y `transcripcion_paginas`, puntúa páginas por los términos de la pregunta y arma un contexto con encabezados como:
+
+```text
+[Convenio #3 | Dependencia | Firma | Vigencia | Responsable] [Página 2 | pdf]
+```
+
+`ai.Answer` responde solo con ese contexto y debe citar `[Convenio #N, página P]`. La UI muestra la respuesta y tarjetas de fuentes que abren el convenio. Si no hay fragmentos, responde que no encontró información. Es apoyo documental, no asesoría legal.
+
+## 9. PDF
 
 - Se valida cabecera `%PDF-`, tamaño (100 MB) y páginas (2000).
 - Se copia con nombre aleatorio de 32 hex + `.pdf`.
@@ -201,7 +249,7 @@ La clave se guarda en `settings.json`; la UI solo devuelve una pista (`has_api_k
 - La transcripción ocurre en la interfaz: PDF.js detecta páginas sin texto y las renderiza a 1800 px como máximo; Go las envía al modelo de visión.
 - No hay OCR local; se depende del servicio externo.
 
-## 9. Compilar
+## 10. Compilar
 
 En Windows (recomendado):
 
@@ -225,7 +273,7 @@ build/bin/ConveniosUAGro.exe
 build/bin/Convenios UAGro-amd64-installer.exe
 ```
 
-## 10. Pruebas
+## 11. Pruebas
 
 ```bash
 go test ./internal/...
@@ -242,6 +290,11 @@ Cubierto:
 - Fechas en español, interpretación de IA y validación.
 - Transcripción: actualización de FTS5 y búsqueda del texto transcrito.
 - Petición de visión: modelo, autorización y `image_url` con JPEG base64.
+- Riesgo: semáforo, motivos y migración v1→v3.
+- Convenios hermanos y contrapartes repetidas.
+- Preparación de contexto con páginas y citas.
+- Respuesta de IA y flujo `AskAI`.
+- Visual de Radar, ficha con riesgo/hermanos y Preguntar sin errores JS.
 
 Prueba manual realizada:
 
@@ -253,12 +306,14 @@ Prueba manual realizada:
 - Visual con Playwright sobre un mock de la API: sin errores JS.
 - Flujo completo de transcripción en Chromium con PDF.js y una API simulada: 3 páginas, barra 3/3, estado "Completa" y búsqueda del texto transcrito con resultado.
 
-## 11. Limitaciones y notas
+## 12. Limitaciones y notas
 
 - Solo Windows 64 bits está empaquetado; el código es portable.
 - Requiere WebView2; Windows 11 lo incluye.
 - La transcripción usa el servicio externo: requiere clave, internet, un modelo de visión y puede tener costo.
 - La transcripción se controla desde la ficha; no hay cola en segundo plano al cerrar la app. Las páginas ya guardadas se conservan.
+- Las preguntas usan recuperación FTS + páginas; si no hay fragmentos, la respuesta es explícita. La IA puede equivocarse: las fuentes deben revisarse.
+- El asistente no es asesoría legal y no toma decisiones.
 - Sin multiusuario, login ni permisos (decisión de producto para una app personal).
 - La IA es opcional y externa; puede tener costo.
 - La clave se guarda sin cifrado adicional, en `settings.json` con permisos locales.
@@ -266,7 +321,7 @@ Prueba manual realizada:
 - El formato visible de `<input type="date">` depende del idioma de Windows; el valor interno es ISO.
 - El respaldo ZIP incluye base y PDF; restaurar copiando a `%APPDATA%\ConveniosUAGro`.
 
-## 12. Entrega
+## 13. Entrega
 
 En el escritorio de Windows:
 
@@ -274,9 +329,10 @@ En el escritorio de Windows:
 C:\Users\PC\Desktop\ConveniosUAGro\
 ├── ConveniosUAGro.exe
 ├── Convenios UAGro-amd64-installer.exe
-├── ConveniosUAGro-1.1.0-win64.zip
+├── ConveniosUAGro-1.2.0-win64.zip
 ├── LEEME.txt
 ├── README.md
+├── DOCUMENTACION-DESKTOP.md
 ├── codigo-fuente.zip
 └── SHA256.txt
 ```

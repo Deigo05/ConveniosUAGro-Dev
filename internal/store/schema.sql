@@ -3,6 +3,7 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS convenios (
   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
   dependencia             TEXT NOT NULL DEFAULT '',
+  responsable             TEXT NOT NULL DEFAULT '',
   fecha_firma             TEXT,
   fecha_vigencia          TEXT,
   vigencia_indefinida     INTEGER NOT NULL DEFAULT 0,
@@ -50,6 +51,14 @@ CREATE TABLE IF NOT EXISTS convenio_etiquetas (
   PRIMARY KEY (convenio_id, etiqueta_id)
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS ix_convenio_etiquetas_etiqueta ON convenio_etiquetas(etiqueta_id);
+
+-- Texto original extraído por página (para citar la página exacta).
+CREATE TABLE IF NOT EXISTS pdf_paginas (
+  convenio_id INTEGER NOT NULL REFERENCES convenios(id) ON DELETE CASCADE,
+  pagina      INTEGER NOT NULL,
+  texto       TEXT NOT NULL,
+  PRIMARY KEY (convenio_id, pagina)
+) WITHOUT ROWID;
 
 -- Texto transcrito por página. Se conserva si el proceso se interrumpe.
 CREATE TABLE IF NOT EXISTS transcripcion_paginas (

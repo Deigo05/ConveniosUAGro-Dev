@@ -23,6 +23,7 @@ type Suggestion struct {
 type ConventionSummary struct {
 	ID                    int64  `json:"id"`
 	Dependencia           string `json:"dependencia"`
+	Responsable           string `json:"responsable"`
 	FechaFirma            string `json:"fecha_firma"`
 	FechaVigencia         string `json:"fecha_vigencia"`
 	VigenciaIndefinida    bool   `json:"vigencia_indefinida"`
@@ -39,9 +40,61 @@ type ConventionSummary struct {
 	TranscripcionError    string `json:"transcripcion_error,omitempty"`
 	PaginasPorTranscribir int    `json:"paginas_por_transcribir"`
 	PaginasTranscritas    int    `json:"paginas_transcritas"`
+	Riesgo                Risk   `json:"riesgo"`
 	CreadoEn              string `json:"creado_en"`
 	ActualizadoEn         string `json:"actualizado_en"`
 	Fragmento             string `json:"fragmento,omitempty"`
+}
+
+// Risk es el semáforo de riesgo de un expediente.
+type Risk struct {
+	Nivel   string   `json:"nivel"`
+	Puntaje int      `json:"puntaje"`
+	Motivos []string `json:"motivos"`
+}
+
+// RelatedConvention es un convenio hermano y la razón de la relación.
+type RelatedConvention struct {
+	ConventionSummary
+	Score   int      `json:"score"`
+	Motivos []string `json:"motivos"`
+}
+
+// CounterpartyGroup agrupa convenios de la misma contraparte.
+type CounterpartyGroup struct {
+	Dependencia string  `json:"dependencia"`
+	Total       int     `json:"total"`
+	Vencidos    int     `json:"vencidos"`
+	IDs         []int64 `json:"ids"`
+}
+
+// RadarResult alimenta el tablero de riesgo.
+type RadarResult struct {
+	Total          int                 `json:"total"`
+	Alto           int                 `json:"alto"`
+	Medio          int                 `json:"medio"`
+	Bajo           int                 `json:"bajo"`
+	SinResponsable int                 `json:"sin_responsable"`
+	SinTranscribir int                 `json:"sin_transcribir"`
+	Vencidos       int                 `json:"vencidos"`
+	PorVencer      int                 `json:"por_vencer"`
+	Items          []ConventionSummary `json:"items"`
+	Contrapartes   []CounterpartyGroup `json:"contrapartes"`
+}
+
+// AskSource es una fuente citada en una respuesta.
+type AskSource struct {
+	ConvenioID  int64  `json:"convenio_id"`
+	Dependencia string `json:"dependencia"`
+	Pagina      int    `json:"pagina"`
+	Fragmento   string `json:"fragmento"`
+	Tipo        string `json:"tipo"`
+}
+
+// AskResult es la respuesta del asistente y sus fuentes.
+type AskResult struct {
+	Respuesta string      `json:"respuesta"`
+	Fuentes   []AskSource `json:"fuentes"`
 }
 
 // TranscriptionStatus es el avance de una transcripción.
@@ -101,6 +154,7 @@ type Stats struct {
 type ConventionInput struct {
 	ID                 int64  `json:"id"`
 	Dependencia        string `json:"dependencia"`
+	Responsable        string `json:"responsable"`
 	FechaFirma         string `json:"fecha_firma"`
 	FechaVigencia      string `json:"fecha_vigencia"`
 	VigenciaIndefinida bool   `json:"vigencia_indefinida"`

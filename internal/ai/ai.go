@@ -180,6 +180,82 @@ func (c *Client) Extract(ctx context.Context, texto string, catalogo []Tag) (Ext
 	return interpret(raw, catalogo)
 }
 
+const answerPrompt = `Eres un asistente documental de la Universidad Autónoma de Guerrero.
+Responde la pregunta usando ÚNICAMENTE los fragmentos de convenios que recibirás.
+Reglas:
+- Responde en español, de forma clara y breve.
+- Cada afirmación debe llevar una cita con el formato [Convenio #N, página P].
+- Si los fragmentos no alcanzan para responder, dilo explícitamente y no inventes.
+- No des asesoría legal definitiva; presenta la información como apoyo para revisión humana.
+- No repitas los fragmentos completos; sintetiza.`
+
+// Answer responde una pregunta con base en fragmentos recuperados.
+func (c *Client) Answer(ctx context.Context, question, contexto string) (string, error) {
+	if c.APIKey == "" {
+		return "", errors.New("no hay una clave de IA configurada")
+	}
+	if strings.TrimSpace(contexto) == "" {
+		return "", errors.New("no se encontraron fragmentos relevantes")
+	}
+	body := map[string]interface{}{
+		"model":       c.Model,
+		"temperature": 0.1,
+		"max_tokens":  1600,
+		"messages": []map[string]string{
+			{"role": "system", "content": answerPrompt},
+			{"role": "user", "content": "Pregunta:\n" + question + "\n\nFragmentos:\n<<<\n" + contexto + "\n>>>"},
+		},
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return "", errors.New("el servicio de IA tardó demasiado en responder")
+		}
+		return "", errors.New("no se pudo conectar con el servicio de IA")
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		switch resp.StatusCode {
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return "", errors.New("la clave de IA es inválida")
+		case http.StatusTooManyRequests:
+			return "", errors.New("se alcanzó el límite de uso de la IA; intente más tarde")
+		default:
+			return "", fmt.Errorf("el servicio de IA respondió con error (%d)", resp.StatusCode)
+		}
+	}
+	var apiResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(data, &apiResp); err != nil || len(apiResp.Choices) == 0 {
+		return "", errors.New("el servicio de IA devolvió una respuesta inesperada")
+	}
+	if apiResp.Choices[0].FinishReason == "length" {
+		return "", errors.New("la respuesta se cortó; intenta una pregunta más específica")
+	}
+	texto := strings.TrimSpace(apiResp.Choices[0].Message.Content)
+	if texto == "" {
+		return "", errors.New("el servicio de IA devolvió una respuesta vacía")
+	}
+	return texto, nil
+}
+
 const transcriptionPrompt = `Eres un transcriptor de documentos. La imagen es una página escaneada de un convenio de la Universidad Autónoma de Guerrero (UAGro), México.
 Transcribe de forma literal y completa todo el texto legible, en orden de lectura, conservando párrafos, títulos y la numeración de cláusulas.
 Reglas:

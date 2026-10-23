@@ -24,6 +24,15 @@
         <span>Convenios</span>
         <span class="nav__badge" id="nav-count">0</span>
       </button>
+      <button class="nav__item" data-view="radar" id="nav-radar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7a5 5 0 1 0 5 5"/><path d="M12 12 19 5"/><circle cx="12" cy="12" r="1"/></svg>
+        <span>Radar</span>
+        <span class="nav__badge" id="radar-count" hidden>0</span>
+      </button>
+      <button class="nav__item" data-view="preguntar" id="nav-preguntar">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4V5Z"/><path d="M8 9h8M8 12h5"/></svg>
+        <span>Preguntar</span>
+      </button>
       <button class="nav__item" data-view="etiquetas" id="nav-etiquetas">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
         <span>Etiquetas</span>
@@ -39,7 +48,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
         <div><strong>Datos locales</strong><span>Todo se guarda en tu PC</span></div>
       </div>
-      <span class="version">Versión 1.1.0</span>
+      <span class="version">Versión 1.2.0</span>
     </div>
   </aside>
 
@@ -172,6 +181,14 @@
           </div>
         </div>
 
+        <div class="detail-risk" id="detail-risk" hidden>
+          <div class="detail-risk__head">
+            <span class="risk" id="risk-badge"></span>
+            <div><strong id="risk-title">Riesgo del expediente</strong><span class="muted" id="risk-score"></span></div>
+          </div>
+          <div class="detail-risk__motives" id="risk-motives"></div>
+        </div>
+
         <div class="banner banner--info" id="detail-ai-banner" hidden></div>
 
         <div class="detail-grid">
@@ -197,6 +214,10 @@
               <label class="field">
                 <span>Nombre de la dependencia</span>
                 <input type="text" id="f-dependencia" maxlength="500" placeholder="Institución u organismo con quien se firmó">
+              </label>
+              <label class="field">
+                <span>Responsable interno</span>
+                <input type="text" id="f-responsable" maxlength="200" placeholder="Persona o área encargada del expediente">
               </label>
               <div class="field-row">
                 <label class="field">
@@ -289,6 +310,17 @@
             </details>
           </section>
 
+          <section class="card related-card" id="related-card" hidden>
+            <div class="card__head">
+              <div>
+                <h2>Convenios hermanos</h2>
+                <p class="muted">Expedientes con la misma contraparte, etiquetas o vigencias relacionadas.</p>
+              </div>
+              <span class="badge badge--blue" id="related-count">0</span>
+            </div>
+            <div class="related-list" id="related-list"></div>
+          </section>
+
           <section class="card ai-card" id="ai-card">
             <div class="card__head">
               <div>
@@ -307,6 +339,89 @@
             </div>
           </section>
         </div>
+      </section>
+
+      <section class="view" id="view-radar" hidden>
+        <div class="section-heading">
+          <div>
+            <h1>Radar de riesgo</h1>
+            <p class="muted">Qué convenios necesitan atención esta semana y por qué.</p>
+          </div>
+          <button class="btn btn--outline" id="radar-ask">Preguntar a la IA</button>
+        </div>
+        <div class="stats-grid">
+          <article class="stat-card stat-card--red">
+            <span class="stat-card__label">Riesgo alto</span>
+            <strong id="radar-alto">0</strong>
+            <span class="stat-card__hint">requieren revisión prioritaria</span>
+          </article>
+          <article class="stat-card stat-card--amber">
+            <span class="stat-card__label">Riesgo medio</span>
+            <strong id="radar-medio">0</strong>
+            <span class="stat-card__hint">expedientes incompletos</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-card__label">Sin responsable</span>
+            <strong id="radar-sin-responsable">0</strong>
+            <span class="stat-card__hint">nadie asignado al expediente</span>
+          </article>
+          <article class="stat-card">
+            <span class="stat-card__label">Sin transcribir</span>
+            <strong id="radar-sin-transcribir">0</strong>
+            <span class="stat-card__hint">escaneados sin texto buscable</span>
+          </article>
+        </div>
+        <div class="radar-grid">
+          <section class="card radar-panel">
+            <div class="card__head">
+              <div><h2>Prioridad</h2><p class="muted">Ordenado por puntaje de riesgo.</p></div>
+              <span class="badge" id="radar-total">0</span>
+            </div>
+            <div class="radar-list" id="radar-items"></div>
+          </section>
+          <section class="card radar-panel">
+            <div class="card__head">
+              <div><h2>Contrapartes repetidas</h2><p class="muted">Instituciones con más de un convenio.</p></div>
+            </div>
+            <div class="counterparty-list" id="radar-groups"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-preguntar" hidden>
+        <div class="section-heading">
+          <div>
+            <h1>Preguntar a los convenios</h1>
+            <p class="muted">La respuesta usa los PDF y las transcripciones, y muestra sus fuentes.</p>
+          </div>
+        </div>
+        <section class="card ask-card">
+          <label class="field">
+            <span>Tu pregunta</span>
+            <textarea id="ask-input" rows="3" maxlength="600" placeholder="Ej. ¿Qué convenios con Guerrero vencen este año y quién es el responsable?"></textarea>
+          </label>
+          <div class="row-actions">
+            <button class="btn btn--primary" id="btn-ask">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.2 4.1L17 9l-3.8 1.9L12 15l-1.2-4.1L7 9l3.8-1.9L12 3Z"/></svg>
+              Preguntar
+            </button>
+            <span class="muted" id="ask-status"></span>
+          </div>
+          <div class="ask-examples" id="ask-examples">
+            <button type="button" data-ask="¿Qué convenios con Guerrero vencen este año?">¿Qué vence con Guerrero?</button>
+            <button type="button" data-ask="¿Qué convenios no tienen responsable asignado?">¿Cuáles no tienen responsable?</button>
+            <button type="button" data-ask="Resume los convenios con el Ayuntamiento de Acapulco.">Resume una contraparte</button>
+          </div>
+          <p class="muted ask-disclaimer">La respuesta es un apoyo documental, no asesoría legal. Verifica siempre la fuente original.</p>
+        </section>
+        <section class="card ask-answer-card" id="ask-answer-card" hidden>
+          <div class="card__head">
+            <div><h2>Respuesta</h2><p class="muted">Generada a partir de los fragmentos citados.</p></div>
+            <span class="badge badge--blue">IA + fuentes</span>
+          </div>
+          <div class="ask-answer" id="ask-answer"></div>
+          <div class="ask-sources" id="ask-sources"></div>
+        </section>
       </section>
 
       <section class="view" id="view-tags" hidden>
@@ -417,7 +532,7 @@
             <h3>Acerca de</h3>
             <p class="muted">Convenios UAGro es una aplicación local para registrar y consultar convenios. No incluye datos de ejemplo: tu base empieza vacía.</p>
             <dl class="meta-list">
-              <dt>Versión</dt><dd id="settings-version">1.1.0</dd>
+              <dt>Versión</dt><dd id="settings-version">1.2.0</dd>
               <dt>Base de datos</dt><dd>SQLite local</dd>
               <dt>Hecho con</dt><dd>Go + Wails + WebView2</dd>
             </dl>

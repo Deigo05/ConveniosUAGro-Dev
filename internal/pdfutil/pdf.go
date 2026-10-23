@@ -31,6 +31,7 @@ type SavedFile struct {
 	SHA256          string
 	Paginas         int
 	PaginasSinTexto int
+	PaginasTexto    []string
 	Texto           string
 	Escaneado       bool
 }
@@ -101,7 +102,7 @@ func Import(src, destDir string) (SavedFile, error) {
 		Bytes:          n,
 		SHA256:         hex.EncodeToString(hash.Sum(nil)),
 	}
-	texto, paginas, paginasSinTexto, err := extractText(final)
+	texto, paginas, paginasSinTexto, paginasTexto, err := extractText(final)
 	if err != nil {
 		// El PDF puede ser válido para el visor aunque esta librería no lo entienda.
 		out.Paginas = 0
@@ -112,12 +113,13 @@ func Import(src, destDir string) (SavedFile, error) {
 	}
 	out.Paginas = paginas
 	out.PaginasSinTexto = paginasSinTexto
+	out.PaginasTexto = paginasTexto
 	out.Texto = texto
 	out.Escaneado = visibleChars(texto) < ScannedThreshold
 	return out, nil
 }
 
-func extractText(path string) (texto string, paginas int, paginasSinTexto int, err error) {
+func extractText(path string) (texto string, paginas int, paginasSinTexto int, paginasTexto []string, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("no se pudo leer el PDF: %v", r)
@@ -125,36 +127,38 @@ func extractText(path string) (texto string, paginas int, paginasSinTexto int, e
 	}()
 	f, reader, err := pdf.Open(path)
 	if err != nil {
-		return "", 0, 0, err
+		return "", 0, 0, nil, err
 	}
 	defer f.Close()
 	n := reader.NumPage()
 	if n < 1 {
-		return "", 0, 0, errors.New("el PDF no tiene páginas")
+		return "", 0, 0, nil, errors.New("el PDF no tiene páginas")
 	}
 	if n > MaxPages {
-		return "", n, 0, fmt.Errorf("el PDF tiene %d páginas; el máximo es %d", n, MaxPages)
+		return "", n, 0, nil, fmt.Errorf("el PDF tiene %d páginas; el máximo es %d", n, MaxPages)
 	}
 	var b strings.Builder
+	paginasTexto = make([]string, 0, n)
 	for i := 1; i <= n; i++ {
 		page := reader.Page(i)
-		if page.V.IsNull() {
+		s := ""
+		if !page.V.IsNull() {
+			if text, err := page.GetPlainText(nil); err == nil {
+				s = text
+			}
+		}
+		if visibleChars(s) < 30 {
 			paginasSinTexto++
-			continue
 		}
-		s, err := page.GetPlainText(nil)
-		if err != nil || visibleChars(s) < 30 {
-			paginasSinTexto++
+		paginasTexto = append(paginasTexto, s)
+		if s != "" {
+			if b.Len() > 0 {
+				b.WriteString("\n\n")
+			}
+			b.WriteString(s)
 		}
-		if err != nil {
-			continue
-		}
-		if b.Len() > 0 {
-			b.WriteString("\n\n")
-		}
-		b.WriteString(s)
 	}
-	return strings.TrimSpace(b.String()), n, paginasSinTexto, nil
+	return strings.TrimSpace(b.String()), n, paginasSinTexto, paginasTexto, nil
 }
 
 func visibleChars(s string) int {
