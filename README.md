@@ -24,9 +24,9 @@ No hay que instalar un servidor ni iniciar sesión. Todo funciona en la PC.
 
 - Importación de PDF individual o múltiple.
 - Datos del convenio: dependencia, fecha de firma, vigencia, cláusula y notas.
-- Etiquetas por ámbito, estado, ciudad y tema, con colores; se pueden asignar varias ciudades.
+- Etiquetas por ámbito, estado, ciudad, facultad y tema, con colores. Solo se permite **una ciudad** (la de la dependencia) y **una facultad** por convenio.
 - Datos de firmantes: nombre y cargo por la dependencia y por la UAGro, más facultad/unidad académica.
-- Etiqueta automática con el nombre de la facultad.
+- Etiqueta automática de facultad con formato `Facultad de <nombre> <ciudad>`.
 - Búsqueda de texto completo dentro del PDF y de los datos capturados.
 - Filtros por etiquetas y por vigencia; columna de estado (vigente, por vencer, vencido, indefinida, sin fecha).
 - Selección múltiple y eliminación en lote.
@@ -129,6 +129,6 @@ Para restaurar:
 
 ## Estado de la entrega
 
-- Versión: 1.1.3
+- Versión: 1.1.4
 - Base inicial: vacía (solo se crean las etiquetas base Nacional/Internacional y los 32 estados).
 - Sin datos de producción ni credenciales.

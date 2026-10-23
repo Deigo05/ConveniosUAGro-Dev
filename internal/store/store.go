@@ -17,7 +17,7 @@ import (
 //go:embed schema.sql
 var schemaFS embed.FS
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 // Paths agrupa las rutas de datos de la aplicación.
 type Paths struct {
@@ -122,6 +122,13 @@ func Open(paths Paths) (*Store, error) {
 			db.Close()
 			return nil, err
 		}
+		version = 3
+	}
+	if version == 3 {
+		if err := migrateV4(db); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 
 	st := &Store{db: db, paths: paths}
@@ -201,6 +208,63 @@ func migrateV3(db *sql.DB) error {
 	return tx.Commit()
 }
 
+// migrateV4 agrega el tipo de etiqueta "facultad" reconstruyendo el catálogo.
+func migrateV4(db *sql.DB) error {
+	if _, err := db.Exec("PRAGMA foreign_keys=OFF"); err != nil {
+		return err
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		db.Exec("PRAGMA foreign_keys=ON")
+		return err
+	}
+	defer func() {
+		tx.Rollback()
+		db.Exec("PRAGMA foreign_keys=ON")
+	}()
+	for _, stmt := range []string{
+		`CREATE TABLE etiquetas_new (
+			id        INTEGER PRIMARY KEY AUTOINCREMENT,
+			nombre    TEXT NOT NULL COLLATE NOCASE,
+			tipo      TEXT NOT NULL CHECK (tipo IN ('ambito','estado','ciudad','tema','facultad')),
+			color     TEXT NOT NULL DEFAULT '#3A5A9C',
+			protegida INTEGER NOT NULL DEFAULT 0,
+			creada_en TEXT NOT NULL DEFAULT (datetime('now'))
+		)`,
+		`INSERT INTO etiquetas_new (id, nombre, tipo, color, protegida, creada_en)
+		 SELECT id, nombre, tipo, color, protegida, creada_en FROM etiquetas`,
+		"DROP TABLE etiquetas",
+		"ALTER TABLE etiquetas_new RENAME TO etiquetas",
+		"CREATE UNIQUE INDEX IF NOT EXISTS ux_etiquetas_tipo_nombre ON etiquetas(tipo, nombre)",
+		`DELETE FROM convenio_etiquetas
+		 WHERE etiqueta_id IN (SELECT id FROM etiquetas WHERE tipo='ciudad')
+		   AND etiqueta_id NOT IN (
+		     SELECT MIN(ce.etiqueta_id) FROM convenio_etiquetas ce
+		     JOIN etiquetas e ON e.id=ce.etiqueta_id
+		     WHERE e.tipo='ciudad' GROUP BY ce.convenio_id
+		   )`,
+		`DELETE FROM convenio_etiquetas
+		 WHERE etiqueta_id IN (SELECT id FROM etiquetas WHERE tipo='facultad')
+		   AND etiqueta_id NOT IN (
+		     SELECT MIN(ce.etiqueta_id) FROM convenio_etiquetas ce
+		     JOIN etiquetas e ON e.id=ce.etiqueta_id
+		     WHERE e.tipo='facultad' GROUP BY ce.convenio_id
+		   )`,
+		"PRAGMA user_version=4",
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Close cierra la base.
 func (s *Store) Close() error { return s.db.Close() }
 
@@ -216,10 +280,11 @@ var (
 )
 
 const (
-	ColorAmbito = "#193060"
-	ColorEstado = "#6D6E71"
-	ColorCiudad = "#2E7D32"
-	ColorTema   = "#3A5A9C"
+	ColorAmbito   = "#193060"
+	ColorEstado   = "#6D6E71"
+	ColorCiudad   = "#2E7D32"
+	ColorFacultad = "#6A1B9A"
+	ColorTema     = "#3A5A9C"
 )
 
 var estadosMx = []string{
@@ -279,8 +344,8 @@ func colorForType(tipo string) string {
 	switch tipo {
 	case "ciudad":
 		return ColorCiudad
-	case "tema":
-		return ColorTema
+	case "facultad":
+		return ColorFacultad
 	default:
 		return ColorTema
 	}

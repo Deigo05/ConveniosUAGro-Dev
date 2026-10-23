@@ -146,14 +146,14 @@ Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional ni bloques 
   "vigencia_desde_firma": boolean,
   "vigencia_texto": string|null,
   "confianza": "alta"|"media"|"baja",
-  "etiquetas": [{"tipo": "ambito"|"estado"|"ciudad"|"tema", "nombre": string, "nueva": boolean}],
+  "etiquetas": [{"tipo": "ambito"|"estado"|"ciudad"|"tema"|"facultad", "nombre": string, "nueva": boolean}],
   "notas": string|null
 }
 Reglas:
 - "dependencia": nombre oficial completo de la institución, dependencia u organismo contraparte con quien la UAGro celebra el convenio. NUNCA la propia UAGro ni sus facultades. Si hay varias contrapartes, sepáralas con "; ".
 - "firmante_dependencia" y "cargo_dependencia": nombre completo y cargo de la persona que firma por la dependencia u organismo contraparte. Búscalos al final del documento, junto a firmas y sellos.
 - "firmante_uagro" y "cargo_uagro": nombre completo y cargo de la persona que firma por la UAGro o por la facultad universitaria.
-- "facultad": nombre oficial de la facultad, escuela o unidad académica de la UAGro que celebra el convenio. Si no aparece, usa null.
+- "facultad": nombre oficial de la facultad, escuela o unidad académica de la UAGro que celebra el convenio. Incluye el número (01, 02, etc.) si forma parte del nombre. Si no aparece, usa null.
 - "fecha_firma": fecha de firma. Convierte fechas escritas en palabras o con meses en español a YYYY-MM-DD. "fecha_firma_texto": fragmento literal.
 - Vigencia:
   - Fecha de término concreta: vigencia_tipo="fecha_exacta" y "fecha_vigencia".
@@ -162,9 +162,10 @@ Reglas:
   - "vigencia_texto": copia literal (máximo 300 caracteres) de la cláusula.
 - "etiquetas": hasta 8 etiquetas relevantes.
   - ambito: 0 o 1, exactamente "Nacional" o "Internacional".
-  - estado: 0 o 1, solo un nombre de la lista de estados existentes.
-  - ciudad: 0 a 5. Puedes proponer varias ciudades si el convenio abarca varias sedes o municipios. Usa el nombre existente si aparece; si no y hay certeza, propón una nueva con "nueva": true.
+  - estado: 0 o 1, el estado donde se ubica la dependencia u organismo contraparte; no el de la UAGro si son distintos. Solo un nombre de la lista de estados existentes.
+  - ciudad: 0 o 1. Debe ser la ciudad donde se ubica la dependencia u organismo contraparte, NO la ciudad de la UAGro. Usa el nombre existente si aparece; si no y hay certeza, propón una nueva con "nueva": true. Nunca propongas más de una ciudad.
   - tema: 0 a 4, solo nombres de temas existentes. No inventes temas.
+  - facultad: no la uses en "etiquetas"; el nombre de la facultad se extrae en el campo "facultad" y el sistema crea su etiqueta.
   - No repitas etiquetas. Si no hay certeza, no la incluyas.
 - No inventes datos. Si falta un dato, usa null y explícalo brevemente en "notas".`
 
@@ -325,7 +326,7 @@ func catalogText(tags []Tag) string {
 	var b strings.Builder
 	b.WriteString("Etiquetas existentes (usa los nombres exactos):\n")
 	groups := []struct{ tipo, titulo string }{
-		{"ambito", "Ámbito"}, {"estado", "Estado"}, {"ciudad", "Ciudad"}, {"tema", "Tema / Rubro"},
+		{"ambito", "Ámbito"}, {"estado", "Estado"}, {"ciudad", "Ciudad"}, {"facultad", "Facultad"}, {"tema", "Tema / Rubro"},
 	}
 	for _, g := range groups {
 		var names []string
@@ -447,7 +448,7 @@ func validateSuggestions(v interface{}, catalogo []Tag) []Suggestion {
 	}
 	aliasTipo := map[string]string{
 		"ámbito": "ambito", "ambito": "ambito", "estados": "estado", "estado": "estado",
-		"ciudades": "ciudad", "ciudad": "ciudad", "temas": "tema", "tema": "tema", "rubro": "tema",
+		"ciudades": "ciudad", "ciudad": "ciudad", "facultades": "facultad", "facultad": "facultad", "temas": "tema", "tema": "tema", "rubro": "tema",
 	}
 	aliasEstado := map[string]string{
 		"michoacan de ocampo": "Michoacán", "coahuila de zaragoza": "Coahuila",
@@ -474,7 +475,7 @@ func validateSuggestions(v interface{}, catalogo []Tag) []Suggestion {
 		nueva := false
 		switch tipo {
 		case "ciudad":
-			if cities >= 5 {
+			if cities >= 1 {
 				continue
 			}
 			cities++

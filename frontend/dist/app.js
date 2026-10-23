@@ -3,8 +3,8 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-const TYPE_ORDER = ['ambito', 'estado', 'ciudad', 'tema'];
-const TYPE_LABEL = { ambito: 'Ámbito', estado: 'Estado', ciudad: 'Ciudad', tema: 'Tema / Rubro' };
+const TYPE_ORDER = ['ambito', 'estado', 'ciudad', 'facultad', 'tema'];
+const TYPE_LABEL = { ambito: 'Ámbito', estado: 'Estado', ciudad: 'Ciudad', facultad: 'Facultad', tema: 'Tema / Rubro' };
 const PALETTE = [
   '#193060', '#2E5AAC', '#3A5A9C', '#5B7DB1', '#7A9CC6',
   '#2E7D32', '#43A047', '#6A994E', '#8D6E63', '#795548',
@@ -626,7 +626,7 @@ function renderTagSelector() {
   const html = TYPE_ORDER.map(tipo => {
     const tags = state.tags.filter(t => t.tipo === tipo);
     return `<fieldset>
-      <legend>${TYPE_LABEL[tipo]}${tipo === 'ciudad' ? ' · puedes elegir varias' : ''}</legend>
+      <legend>${TYPE_LABEL[tipo]}${tipo === 'ciudad' || tipo === 'facultad' ? ' · una sola' : ''}</legend>
       <div class="tag-selector__list">
         ${tags.length ? tags.map(t => `
           <label class="tag-selector__item">
@@ -644,7 +644,7 @@ function onTagSelectorChange(e) {
   const input = e.target.closest('[data-select-tag]');
   if (!input || !input.checked) return;
   const type = input.dataset.type;
-  if (type !== 'ambito' && type !== 'estado') return;
+  if (type !== 'ambito' && type !== 'estado' && type !== 'ciudad' && type !== 'facultad') return;
   $$(`[data-select-tag][data-type="${type}"]`, $('#tags-selector')).forEach(other => {
     if (other !== input) other.checked = false;
   });

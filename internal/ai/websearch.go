@@ -86,10 +86,10 @@ func (c *Client) enrichLocation(ctx context.Context, ext *Extraction, catalogo [
 	if hasState && hasCity && !uncertainCity {
 		return
 	}
-	if strings.TrimSpace(ext.Dependencia) == "" && strings.TrimSpace(ext.Facultad) == "" {
+	if strings.TrimSpace(ext.Dependencia) == "" {
 		return
 	}
-	query := strings.TrimSpace(ext.Dependencia + " " + ext.Facultad + " ubicación ciudad estado México")
+	query := strings.TrimSpace(ext.Dependencia + " dirección ciudad estado México")
 	results := c.searchWeb(ctx, query)
 	if results == "" {
 		return
@@ -104,6 +104,7 @@ Resultados de búsqueda web:
 %s
 
 Devuelve únicamente un JSON válido con la clave "etiquetas": una lista de etiquetas de ubicación.
+La ciudad debe ser la de la dependencia/contraparte, no la de la UAGro. Devuelve como máximo una ciudad.
 Usa solo etiquetas de tipo ambito, estado o ciudad. Usa los nombres exactos del catálogo.
 Si los resultados no permiten confirmar una ubicación, devuelve una lista vacía. No inventes.
 Catálogo:

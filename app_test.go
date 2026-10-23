@@ -69,3 +69,65 @@ func TestTranscribePagePipeline(t *testing.T) {
 		t.Fatalf("la transcripción no entró a FTS: %d", res.Total)
 	}
 }
+
+func TestExtractSignatoriesFacultyAndFacultyTag(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"choices":[{"message":{"content":"{\"dependencia\":\"Ayuntamiento de Acapulco\",\"firmante_dependencia\":\"Ana López\",\"cargo_dependencia\":\"Presidenta\",\"firmante_uagro\":\"Luis Pérez\",\"cargo_uagro\":\"Director\",\"facultad\":\"Facultad de Turismo\",\"fecha_firma\":\"2024-03-15\",\"vigencia_tipo\":\"indefinida\",\"etiquetas\":[{\"tipo\":\"ambito\",\"nombre\":\"Nacional\"},{\"tipo\":\"estado\",\"nombre\":\"Guerrero\"},{\"tipo\":\"ciudad\",\"nombre\":\"Acapulco\"}]}"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+	dir := t.TempDir()
+	t.Setenv("CONVENIOS_DATA_DIR", dir)
+	paths, err := store.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	id, err := st.Insert(pdfutil.SavedFile{
+		NombreGuardado: "abcdefabcdefabcdefabcdefabcdef12.pdf", NombreOriginal: "x.pdf",
+		Texto: "Convenio entre la UAGro y el Ayuntamiento de Acapulco.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &App{store: st, paths: paths, cfg: config.Config{AIEnabled: true, APIKey: "k", BaseURL: srv.URL, Model: "m", VisionModel: "v", WebSearchEnabled: false}}
+	res, err := a.ExtractAI(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Facultad != "Facultad de Turismo" || res.FirmanteUAGro != "Luis Pérez" || res.CargoUAGro != "Director" {
+		t.Fatalf("ficha = %+v", res.ConventionSummary)
+	}
+	tags, err := st.TagsForConvention(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, tag := range tags {
+		if tag.Tipo == "facultad" && tag.Nombre == "Facultad de Turismo Acapulco" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no se creó la etiqueta de facultad: %+v", tags)
+	}
+}
+
+func TestFacultyTagName(t *testing.T) {
+	cases := []struct{ facultad, city, want string }{
+		{"Turismo", "Acapulco", "Facultad de Turismo Acapulco"},
+		{"Facultad de Turismo", "Acapulco", "Facultad de Turismo Acapulco"},
+		{"Facultad de Ingeniería 01", "Chilpancingo", "Facultad de Ingeniería 01 Chilpancingo"},
+		{"Facultad Ingeniería 02", "Acapulco", "Facultad de Ingeniería 02 Acapulco"},
+		{"Facultad de Turismo Acapulco", "Acapulco", "Facultad de Turismo Acapulco"},
+	}
+	for _, c := range cases {
+		if got := facultyTagName(c.facultad, c.city); got != c.want {
+			t.Errorf("facultyTagName(%q, %q) = %q, want %q", c.facultad, c.city, got, c.want)
+		}
+	}
+}

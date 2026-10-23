@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.4] - 2026-10-23
+
+### Cambiado
+
+- Solo se permite **una etiqueta de ciudad** por convenio. La IA sugiere como máximo una y debe ser la ciudad de la dependencia, no la de la UAGro.
+- Las etiquetas de facultad ahora son un **tipo propio** (`facultad`), separado de Tema / Rubro.
+- El nombre de la etiqueta de facultad sigue el formato `Facultad de <nombre> <ciudad>`, conservando el número (01, 02, etc.) cuando forma parte del nombre.
+- La etiqueta de facultad se actualiza al aceptar sugerencias, cambiar la ciudad o editar la facultad.
+
+### Corregido
+
+- Migración de base a esquema 4 para admitir el tipo `facultad`.
+- Limpieza de ciudades duplicadas en convenios existentes.
+
 ## [1.1.3] - 2026-10-23
 
 ### Agregado
@@ -7,7 +21,7 @@
 - Campos de firmante y cargo de la dependencia y de la UAGro.
 - Campo de facultad/unidad académica y etiqueta automática de facultad.
 - Búsqueda web opcional (DuckDuckGo) para confirmar ubicación cuando faltan estado o ciudad.
-- Soporte explícito para varias etiquetas de ciudad.
+- Etiquetas de ciudad en la clasificación de convenios.
 
 ### Corregido
 

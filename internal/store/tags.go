@@ -32,7 +32,7 @@ func (s *Store) ListTags() ([]Tag, error) {
 		LEFT JOIN convenio_etiquetas ce ON ce.etiqueta_id = e.id
 		GROUP BY e.id
 		ORDER BY CASE e.tipo WHEN 'ambito' THEN 0 WHEN 'estado' THEN 1
-		                      WHEN 'ciudad' THEN 2 ELSE 3 END,
+		                      WHEN 'ciudad' THEN 2 WHEN 'facultad' THEN 3 ELSE 4 END,
 		         e.nombre COLLATE NOCASE`)
 	if err != nil {
 		return nil, err
@@ -49,11 +49,11 @@ func (s *Store) ListTags() ([]Tag, error) {
 	return tags, rows.Err()
 }
 
-// CreateTag crea una etiqueta de ciudad o tema. Las base no se crean desde la interfaz.
+// CreateTag crea una etiqueta de ciudad, tema o facultad. Las base no se crean desde la interfaz.
 func (s *Store) CreateTag(in TagInput) (Tag, error) {
 	tipo := strings.ToLower(strings.TrimSpace(in.Tipo))
-	if tipo != "ciudad" && tipo != "tema" {
-		return Tag{}, errors.New("solo se pueden crear etiquetas de ciudad o tema")
+	if tipo != "ciudad" && tipo != "tema" && tipo != "facultad" {
+		return Tag{}, errors.New("solo se pueden crear etiquetas de ciudad, tema o facultad")
 	}
 	nombre, err := validateTagName(in.Nombre)
 	if err != nil {
@@ -137,7 +137,7 @@ func (s *Store) TagsForConvention(id int64) ([]Tag, error) {
 		FROM convenio_etiquetas ce JOIN etiquetas e ON e.id = ce.etiqueta_id
 		WHERE ce.convenio_id = ?
 		ORDER BY CASE e.tipo WHEN 'ambito' THEN 0 WHEN 'estado' THEN 1
-		                      WHEN 'ciudad' THEN 2 ELSE 3 END,
+		                      WHEN 'ciudad' THEN 2 WHEN 'facultad' THEN 3 ELSE 4 END,
 		         e.nombre COLLATE NOCASE`, id)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func (s *Store) TagsForIDs(ids []int64) (map[int64][]Tag, error) {
 		FROM convenio_etiquetas ce JOIN etiquetas e ON e.id = ce.etiqueta_id
 		WHERE ce.convenio_id IN (`+strings.Join(ph, ",")+`)
 		ORDER BY CASE e.tipo WHEN 'ambito' THEN 0 WHEN 'estado' THEN 1
-		                      WHEN 'ciudad' THEN 2 ELSE 3 END,
+		                      WHEN 'ciudad' THEN 2 WHEN 'facultad' THEN 3 ELSE 4 END,
 		         e.nombre COLLATE NOCASE`, args...)
 	if err != nil {
 		return nil, err
@@ -229,10 +229,10 @@ func (s *Store) ReplaceTags(convenioID int64, ids []int64, markReviewed bool) er
 		if seen[t.ID] {
 			continue
 		}
-		if (t.Tipo == "ambito" || t.Tipo == "estado") && seenType[t.Tipo] {
+		if (t.Tipo == "ambito" || t.Tipo == "estado" || t.Tipo == "ciudad" || t.Tipo == "facultad") && seenType[t.Tipo] {
 			continue
 		}
-		if t.Tipo == "ambito" || t.Tipo == "estado" {
+		if t.Tipo == "ambito" || t.Tipo == "estado" || t.Tipo == "ciudad" || t.Tipo == "facultad" {
 			seenType[t.Tipo] = true
 		}
 		seen[t.ID] = true
@@ -290,7 +290,7 @@ func ParseSuggestions(raw string) []Suggestion {
 	for _, s := range list {
 		s.Tipo = strings.ToLower(strings.TrimSpace(s.Tipo))
 		s.Nombre = strings.TrimSpace(s.Nombre)
-		if s.Nombre == "" || (s.Tipo != "ambito" && s.Tipo != "estado" && s.Tipo != "ciudad" && s.Tipo != "tema") {
+		if s.Nombre == "" || (s.Tipo != "ambito" && s.Tipo != "estado" && s.Tipo != "ciudad" && s.Tipo != "tema" && s.Tipo != "facultad") {
 			continue
 		}
 		if len([]rune(s.Nombre)) > 80 {
@@ -341,10 +341,11 @@ func (s *Store) AcceptSuggestions(convenioID int64) error {
 			return err
 		}
 		if !ok {
-			if tipo != "ciudad" {
+			if tipo != "ciudad" && tipo != "facultad" {
 				continue // los temas y las etiquetas base no se inventan
 			}
-			tag, err = s.CreateTag(TagInput{Nombre: nombre, Tipo: "ciudad", Color: ColorCiudad})
+			color := colorForType(tipo)
+			tag, err = s.CreateTag(TagInput{Nombre: nombre, Tipo: tipo, Color: color})
 			if err != nil {
 				// Si otra instancia la creó, se busca de nuevo.
 				tag, ok, err = s.findTag(tipo, nombre)
