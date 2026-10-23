@@ -17,7 +17,7 @@ import (
 //go:embed schema.sql
 var schemaFS embed.FS
 
-const schemaVersion = 4
+const schemaVersion = 5
 
 // Paths agrupa las rutas de datos de la aplicación.
 type Paths struct {
@@ -126,6 +126,13 @@ func Open(paths Paths) (*Store, error) {
 	}
 	if version == 3 {
 		if err := migrateV4(db); err != nil {
+			db.Close()
+			return nil, err
+		}
+		version = 4
+	}
+	if version == 4 {
+		if err := migrateV5(db); err != nil {
 			db.Close()
 			return nil, err
 		}
@@ -263,6 +270,22 @@ func migrateV4(db *sql.DB) error {
 		return err
 	}
 	return nil
+}
+
+// migrateV5 separa la ciudad de la facultad de la ciudad de la dependencia.
+func migrateV5(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("ALTER TABLE convenios ADD COLUMN facultad_ciudad TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("PRAGMA user_version=5"); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Close cierra la base.

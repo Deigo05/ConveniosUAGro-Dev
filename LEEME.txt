@@ -1,4 +1,4 @@
-CONVENIOS UAGRO · 1.1.4
+CONVENIOS UAGRO · 1.1.5
 Aplicación de escritorio para gestionar convenios
 
 QUÉ ES
@@ -37,8 +37,9 @@ AUTOMATIZACIÓN AL IMPORTAR
 
 DATOS EXTRAÍDOS
 - Firmante y cargo por la dependencia y por la UAGro.
-- Facultad o unidad académica; se crea una etiqueta de tipo Facultad con el formato "Facultad de <nombre> <ciudad>".
+- Facultad o unidad académica y su ciudad (sede de la UAGro); se crea una etiqueta de tipo Facultad con el formato "Facultad de <nombre> <ciudad de la facultad>".
 - Solo se permite una etiqueta de ciudad: la ciudad donde se ubica la dependencia.
+- La ciudad de la facultad es independiente: por ejemplo, la Facultad de Turismo es de Acapulco aunque la dependencia esté en Tijuana.
 - Si faltan ciudad o estado, la IA puede buscar la ubicación en internet.
 
 TRANSCRIPCIÓN DE ESCANEADOS

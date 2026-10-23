@@ -114,6 +114,19 @@ func (s *Store) UpdateTag(in TagInput) error {
 	return err
 }
 
+// DeleteTagIfUnused elimina una etiqueta no protegida si ya no está asignada.
+func (s *Store) DeleteTagIfUnused(id int64) error {
+	var count int
+	if err := s.db.QueryRow("SELECT count(*) FROM convenio_etiquetas WHERE etiqueta_id=?", id).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	_, err := s.db.Exec("DELETE FROM etiquetas WHERE id=? AND protegida=0", id)
+	return err
+}
+
 // DeleteTag elimina una etiqueta no protegida y sus asignaciones.
 func (s *Store) DeleteTag(id int64) error {
 	var protegida bool

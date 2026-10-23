@@ -45,6 +45,7 @@ convenios-desktop/
 │   ├── config/config.go       settings.json, clave IA, vista segura
 │   ├── store/
 │   │   ├── store.go           Open, rutas, esquema, etiquetas base
+│   │   └── uagro/             Catálogo de facultades y sedes UAGro
 │   │   ├── schema.sql         tablas, FTS5 y triggers
 │   │   ├── types.go           structs de la API
 │   │   ├── tags.go            catálogo, asignación, sugerencias
@@ -84,11 +85,11 @@ La variable `CONVENIOS_DATA_DIR` permite usar otra carpeta (pruebas). El ejecuta
 ### Esquema
 
 - `convenios`: datos, archivo, `texto_pdf` original, `texto` final, estado IA, sugerencias, clasificación, estado de transcripción y fechas.
-- `etiquetas`: `ambito`, `estado`, `ciudad`, `facultad`, `tema`; `protegida` para las base.
+- `etiquetas`: `ambito`, `estado`, `ciudad`, `facultad`, `tema`; `protegida` para las base. `convenios.facultad_ciudad` guarda la sede de la facultad, separada de la ciudad de la dependencia.
 - `convenio_etiquetas`: N:M con cascada.
 - `transcripcion_paginas`: texto por página, PK `(convenio_id, pagina)`.
 - `convenios_fts`: FTS5 sobre dependencia, archivo, notas y texto, con triggers.
-- `PRAGMA user_version = 2`. La migración v1→v2 agrega `texto_pdf`, el estado de transcripción y `transcripcion_paginas`.
+- `PRAGMA user_version = 5`. Las migraciones agregan transcripción, firmantes/facultad, tipo `facultad` y `facultad_ciudad`.
 
 Las etiquetas base son:
 
@@ -274,7 +275,7 @@ En el escritorio de Windows:
 C:\Users\PC\Desktop\ConveniosUAGro\
 ├── ConveniosUAGro.exe
 ├── Convenios UAGro-amd64-installer.exe
-├── ConveniosUAGro-1.1.4-win64.zip
+├── ConveniosUAGro-1.1.5-win64.zip
 ├── LEEME.txt
 ├── README.md
 ├── codigo-fuente.zip

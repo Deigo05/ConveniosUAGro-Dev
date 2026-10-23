@@ -177,7 +177,7 @@ func (s *Store) List(f ListFilter) (ListResult, error) {
 	}
 	offset := (f.Page - 1) * pageSize
 	query := `SELECT c.id, c.dependencia, coalesce(c.firmante_dependencia,''), coalesce(c.cargo_dependencia,''),
-		coalesce(c.firmante_uagro,''), coalesce(c.cargo_uagro,''), coalesce(c.facultad,''),
+		coalesce(c.firmante_uagro,''), coalesce(c.cargo_uagro,''), coalesce(c.facultad,''), coalesce(c.facultad_ciudad,''),
 		coalesce(c.fecha_firma,''), coalesce(c.fecha_vigencia,''),
 		c.vigencia_indefinida, c.vigencia_calculada, c.archivo_nombre_original, c.paginas,
 		c.es_escaneado, c.ia_estado, c.ia_error, c.etiquetas_revisadas,
@@ -202,7 +202,7 @@ func (s *Store) List(f ListFilter) (ListResult, error) {
 		var c ConventionSummary
 		var indef, calc, scanned, revisadas int
 		if err := rows.Scan(&c.ID, &c.Dependencia, &c.FirmanteDependencia, &c.CargoDependencia,
-			&c.FirmanteUAGro, &c.CargoUAGro, &c.Facultad,
+			&c.FirmanteUAGro, &c.CargoUAGro, &c.Facultad, &c.FacultadCiudad,
 			&c.FechaFirma, &c.FechaVigencia,
 			&indef, &calc, &c.ArchivoNombreOriginal, &c.Paginas, &scanned,
 			&c.IAEstado, &c.IAError, &revisadas, &c.TranscripcionEstado,
@@ -285,7 +285,7 @@ func (s *Store) Get(id int64) (ConventionDetail, error) {
 	var sugerenciasRaw, textoPDF string
 	err := s.db.QueryRow(`
 		SELECT id, dependencia, firmante_dependencia, cargo_dependencia, firmante_uagro,
-		       cargo_uagro, facultad, fecha_firma, fecha_vigencia, vigencia_indefinida,
+		       cargo_uagro, facultad, facultad_ciudad, fecha_firma, fecha_vigencia, vigencia_indefinida,
 		       vigencia_texto, vigencia_calculada, notas, archivo_nombre_original,
 		       archivo_guardado, archivo_bytes, archivo_sha256, paginas, es_escaneado,
 		       texto_pdf, texto, ia_estado, ia_error, etiquetas_sugeridas, etiquetas_revisadas,
@@ -293,7 +293,7 @@ func (s *Store) Get(id int64) (ConventionDetail, error) {
 		       paginas_transcritas, creado_en, actualizado_en
 		FROM convenios WHERE id=?`, id).Scan(
 		&c.ID, &c.Dependencia, &c.FirmanteDependencia, &c.CargoDependencia, &c.FirmanteUAGro,
-		&c.CargoUAGro, &c.Facultad, &fechaFirma, &fechaVigencia, &indef,
+		&c.CargoUAGro, &c.Facultad, &c.FacultadCiudad, &fechaFirma, &fechaVigencia, &indef,
 		&c.VigenciaTexto, &calc, &c.Notas, &c.ArchivoNombreOriginal,
 		&c.ArchivoGuardado, &c.ArchivoBytes, &c.ArchivoSHA256, &c.Paginas, &scanned,
 		&textoPDF, &c.Texto, &c.IAEstado, &c.IAError, &sugerenciasRaw, &revisadas,
@@ -331,13 +331,13 @@ func (s *Store) Update(in ConventionInput) error {
 	}
 	_, err := s.db.Exec(`
 		UPDATE convenios SET dependencia=?, firmante_dependencia=?, cargo_dependencia=?,
-			firmante_uagro=?, cargo_uagro=?, facultad=?, fecha_firma=?, fecha_vigencia=?,
+			firmante_uagro=?, cargo_uagro=?, facultad=?, facultad_ciudad=?, fecha_firma=?, fecha_vigencia=?,
 			vigencia_indefinida=?, vigencia_calculada=0, vigencia_texto=?, notas=?,
 			actualizado_en=datetime('now')
 		WHERE id=?`,
 		strings.TrimSpace(in.Dependencia), strings.TrimSpace(in.FirmanteDependencia),
 		strings.TrimSpace(in.CargoDependencia), strings.TrimSpace(in.FirmanteUAGro),
-		strings.TrimSpace(in.CargoUAGro), strings.TrimSpace(in.Facultad),
+		strings.TrimSpace(in.CargoUAGro), strings.TrimSpace(in.Facultad), strings.TrimSpace(in.FacultadCiudad),
 		nullIfEmpty(in.FechaFirma), nullIfEmpty(in.FechaVigencia),
 		boolInt(in.VigenciaIndefinida), strings.TrimSpace(in.VigenciaTexto), strings.TrimSpace(in.Notas), in.ID)
 	return err
@@ -348,6 +348,12 @@ func nullIfEmpty(s string) interface{} {
 		return nil
 	}
 	return strings.TrimSpace(s)
+}
+
+// SetFacultyCity guarda la sede de la facultad cuando se resuelve por catálogo.
+func (s *Store) SetFacultyCity(id int64, city string) error {
+	_, err := s.db.Exec("UPDATE convenios SET facultad_ciudad=?, actualizado_en=datetime('now') WHERE id=?", strings.TrimSpace(city), id)
+	return err
 }
 
 // SetIAStatus guarda el resultado o el error de una extracción.
@@ -371,14 +377,14 @@ func (s *Store) SetAIResult(id int64, in ConventionInput, estado string, sugeren
 	}
 	_, err := s.db.Exec(`
 		UPDATE convenios SET dependencia=?, firmante_dependencia=?, cargo_dependencia=?,
-			firmante_uagro=?, cargo_uagro=?, facultad=?, fecha_firma=?, fecha_vigencia=?,
+			firmante_uagro=?, cargo_uagro=?, facultad=?, facultad_ciudad=?, fecha_firma=?, fecha_vigencia=?,
 			vigencia_indefinida=?, vigencia_calculada=?, vigencia_texto=?, notas=?,
 			ia_estado=?, ia_error='', etiquetas_sugeridas=?, etiquetas_revisadas=0,
 			actualizado_en=datetime('now')
 		WHERE id=?`,
 		strings.TrimSpace(in.Dependencia), strings.TrimSpace(in.FirmanteDependencia),
 		strings.TrimSpace(in.CargoDependencia), strings.TrimSpace(in.FirmanteUAGro),
-		strings.TrimSpace(in.CargoUAGro), strings.TrimSpace(in.Facultad),
+		strings.TrimSpace(in.CargoUAGro), strings.TrimSpace(in.Facultad), strings.TrimSpace(in.FacultadCiudad),
 		nullIfEmpty(in.FechaFirma), nullIfEmpty(in.FechaVigencia),
 		boolInt(in.VigenciaIndefinida), boolInt(in.VigenciaCalculada), strings.TrimSpace(in.VigenciaTexto),
 		strings.TrimSpace(in.Notas+" "+notas), estado, data, id)

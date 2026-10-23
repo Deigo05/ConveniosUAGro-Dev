@@ -28,6 +28,7 @@ type ConventionSummary struct {
 	FirmanteUAGro         string `json:"firmante_uagro"`
 	CargoUAGro            string `json:"cargo_uagro"`
 	Facultad              string `json:"facultad"`
+	FacultadCiudad        string `json:"facultad_ciudad"`
 	FechaFirma            string `json:"fecha_firma"`
 	FechaVigencia         string `json:"fecha_vigencia"`
 	VigenciaIndefinida    bool   `json:"vigencia_indefinida"`
@@ -111,6 +112,7 @@ type ConventionInput struct {
 	FirmanteUAGro       string `json:"firmante_uagro"`
 	CargoUAGro          string `json:"cargo_uagro"`
 	Facultad            string `json:"facultad"`
+	FacultadCiudad      string `json:"facultad_ciudad"`
 	FechaFirma          string `json:"fecha_firma"`
 	FechaVigencia       string `json:"fecha_vigencia"`
 	VigenciaIndefinida  bool   `json:"vigencia_indefinida"`

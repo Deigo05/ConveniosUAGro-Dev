@@ -549,6 +549,7 @@ function renderDetail() {
   $('#f-firmante-uagro').value = c.firmante_uagro || '';
   $('#f-cargo-uagro').value = c.cargo_uagro || '';
   $('#f-facultad').value = c.facultad || '';
+  $('#f-facultad-ciudad').value = c.facultad_ciudad || '';
   $('#f-firma').value = c.fecha_firma || '';
   $('#f-vigencia').value = c.fecha_vigencia || '';
   $('#f-vigencia-texto').value = c.vigencia_texto || '';
@@ -662,6 +663,7 @@ async function saveConvenio(e) {
     firmante_uagro: $('#f-firmante-uagro').value.trim(),
     cargo_uagro: $('#f-cargo-uagro').value.trim(),
     facultad: $('#f-facultad').value.trim(),
+    facultad_ciudad: $('#f-facultad-ciudad').value.trim(),
     fecha_firma: $('#f-firma').value,
     fecha_vigencia: $('#f-indefinida').checked ? '' : $('#f-vigencia').value,
     vigencia_indefinida: $('#f-indefinida').checked,
