@@ -201,15 +201,21 @@ function renderStats() {
   $('#btn-pending').classList.toggle('is-active', Boolean(state.filters.solo_pendientes));
 }
 
-async function loadList() {
+async function loadList(options = {}) {
   if (state.listLoading) return;
   state.listLoading = true;
+  const selected = options.preserveSelection ? new Set(state.selected) : null;
   const area = $('#list-area');
   area.setAttribute('aria-busy', 'true');
   try {
     const res = await call('ListConvenios', state.filters);
     state.result = res;
-    state.selected.clear();
+    if (selected) {
+      const visible = new Set(res.items.map(c => c.id));
+      state.selected = new Set([...selected].filter(id => visible.has(id)));
+    } else {
+      state.selected.clear();
+    }
     renderList();
     renderSummary();
     renderPagination();
@@ -262,7 +268,7 @@ function syncProcessingPoll() {
   if (state.view !== 'convenios') return;
   if (!state.autoRunning && processingItems().length === 0) return;
   state.pollTimer = setTimeout(() => {
-    if (state.view === 'convenios') loadList();
+    if (state.view === 'convenios') loadList({ preserveSelection: true });
   }, 3000);
 }
 
