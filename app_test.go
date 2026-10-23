@@ -73,7 +73,7 @@ func TestTranscribePagePipeline(t *testing.T) {
 func TestExtractSignatoriesFacultyAndFacultyTag(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"choices":[{"message":{"content":"{\"dependencia\":\"Ayuntamiento de Acapulco\",\"firmante_dependencia\":\"Ana López\",\"cargo_dependencia\":\"Presidenta\",\"firmante_uagro\":\"Luis Pérez\",\"cargo_uagro\":\"Director\",\"facultad\":\"Facultad de Turismo\",\"fecha_firma\":\"2024-03-15\",\"vigencia_tipo\":\"indefinida\",\"etiquetas\":[{\"tipo\":\"ambito\",\"nombre\":\"Nacional\"},{\"tipo\":\"estado\",\"nombre\":\"Guerrero\"},{\"tipo\":\"ciudad\",\"nombre\":\"Acapulco\"}]}"},"finish_reason":"stop"}]}`)
+		io.WriteString(w, `{"choices":[{"message":{"content":"{\"dependencia\":\"Ayuntamiento de Acapulco\",\"firmante_dependencia\":\"Ana López\",\"cargo_dependencia\":\"Presidenta\",\"firmante_uagro\":\"Luis Pérez\",\"cargo_uagro\":\"Director\",\"facultad\":\"Facultad de Turismo\",\"facultad_ciudad\":\"Acapulco\",\"fecha_firma\":\"2024-03-15\",\"vigencia_tipo\":\"indefinida\",\"etiquetas\":[{\"tipo\":\"ambito\",\"nombre\":\"Nacional\"},{\"tipo\":\"estado\",\"nombre\":\"Guerrero\"},{\"tipo\":\"ciudad\",\"nombre\":\"Acapulco\"}]}"},"finish_reason":"stop"}]}`)
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
@@ -99,7 +99,7 @@ func TestExtractSignatoriesFacultyAndFacultyTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Facultad != "Facultad de Turismo" || res.FirmanteUAGro != "Luis Pérez" || res.CargoUAGro != "Director" {
+	if res.Facultad != "Facultad de Turismo" || res.FacultadCiudad != "Acapulco" || res.FirmanteUAGro != "Luis Pérez" || res.CargoUAGro != "Director" {
 		t.Fatalf("ficha = %+v", res.ConventionSummary)
 	}
 	tags, err := st.TagsForConvention(id)
@@ -117,17 +117,61 @@ func TestExtractSignatoriesFacultyAndFacultyTag(t *testing.T) {
 	}
 }
 
-func TestFacultyTagName(t *testing.T) {
-	cases := []struct{ facultad, city, want string }{
-		{"Turismo", "Acapulco", "Facultad de Turismo Acapulco"},
-		{"Facultad de Turismo", "Acapulco", "Facultad de Turismo Acapulco"},
-		{"Facultad de Ingeniería 01", "Chilpancingo", "Facultad de Ingeniería 01 Chilpancingo"},
-		{"Facultad Ingeniería 02", "Acapulco", "Facultad de Ingeniería 02 Acapulco"},
-		{"Facultad de Turismo Acapulco", "Acapulco", "Facultad de Turismo Acapulco"},
+func TestRepairFacultyTagUsesFacultyCityNotDependencyCity(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("CONVENIOS_DATA_DIR", dir)
+	paths, err := store.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range cases {
-		if got := facultyTagName(c.facultad, c.city); got != c.want {
-			t.Errorf("facultyTagName(%q, %q) = %q, want %q", c.facultad, c.city, got, c.want)
+	st, err := store.Open(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	id, err := st.Insert(pdfutil.SavedFile{NombreGuardado: "fedcba9876543210fedcba9876543210.pdf", NombreOriginal: "x.pdf"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(store.ConventionInput{ID: id, Dependencia: "Corazón Artesano Tijuana", Facultad: "Facultad de Turismo"}); err != nil {
+		t.Fatal(err)
+	}
+	city, err := st.CreateTag(store.TagInput{Nombre: "Tijuana", Tipo: "ciudad", Color: store.ColorCiudad})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad, err := st.CreateTag(store.TagInput{Nombre: "Facultad de Turismo Tijuana", Tipo: "facultad", Color: store.ColorFacultad})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ReplaceTags(id, []int64{city.ID, bad.ID}, true); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{store: st, paths: paths}
+	a.repairFacultyTags()
+	tags, err := st.TagsForConvention(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, tag := range tags {
+		if tag.Tipo == "facultad" {
+			if tag.Nombre != "Facultad de Turismo Acapulco" {
+				t.Fatalf("etiqueta incorrecta: %+v", tag)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no se corrigió la etiqueta: %+v", tags)
+	}
+	all, err := st.ListTags()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range all {
+		if tag.Tipo == "facultad" && tag.Nombre == "Facultad de Turismo Tijuana" {
+			t.Fatalf("quedó la etiqueta antigua: %+v", tag)
 		}
 	}
 }

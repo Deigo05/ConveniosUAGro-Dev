@@ -39,7 +39,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
         <div><strong>Datos locales</strong><span>Todo se guarda en tu PC</span></div>
       </div>
-      <span class="version">Versión 1.1.4</span>
+      <span class="version">Versión 1.1.5</span>
     </div>
   </aside>
 
@@ -219,10 +219,16 @@
                   <input type="text" id="f-cargo-uagro" maxlength="200" placeholder="Cargo">
                 </label>
               </div>
-              <label class="field">
-                <span>Facultad o unidad académica</span>
-                <input type="text" id="f-facultad" maxlength="200" placeholder="Ej. Facultad de Turismo">
-              </label>
+              <div class="field-row">
+                <label class="field">
+                  <span>Facultad o unidad académica (UAGro)</span>
+                  <input type="text" id="f-facultad" maxlength="200" placeholder="Ej. Facultad de Turismo">
+                </label>
+                <label class="field">
+                  <span>Ciudad de la facultad</span>
+                  <input type="text" id="f-facultad-ciudad" maxlength="100" placeholder="Ej. Acapulco">
+                </label>
+              </div>
               <div class="field-row">
                 <label class="field">
                   <span>Fecha de firma</span>
@@ -448,7 +454,7 @@
             <h3>Acerca de</h3>
             <p class="muted">Convenios UAGro es una aplicación local para registrar y consultar convenios. No incluye datos de ejemplo: tu base empieza vacía.</p>
             <dl class="meta-list">
-              <dt>Versión</dt><dd id="settings-version">1.1.4</dd>
+              <dt>Versión</dt><dd id="settings-version">1.1.5</dd>
               <dt>Base de datos</dt><dd>SQLite local</dd>
               <dt>Hecho con</dt><dd>Go + Wails + WebView2</dd>
             </dl>

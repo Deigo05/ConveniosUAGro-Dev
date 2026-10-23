@@ -20,11 +20,12 @@ import (
 	"convenios-uagro-desktop/internal/config"
 	"convenios-uagro-desktop/internal/pdfutil"
 	"convenios-uagro-desktop/internal/store"
+	"convenios-uagro-desktop/internal/uagro"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.1.4"
+const appVersion = "1.1.5"
 
 // App es el puente entre la interfaz y la base local.
 type App struct {
@@ -73,6 +74,7 @@ func NewApp() (*App, error) {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.repairFacultyTags()
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -125,7 +127,7 @@ func (a *App) SaveConvenio(in store.ConventionInput) (store.ConventionDetail, er
 		return store.ConventionDetail{}, err
 	}
 	if strings.TrimSpace(in.Facultad) != "" {
-		_ = a.ensureFacultyTag(in.ID, in.Facultad, "")
+		_ = a.ensureFacultyTag(in.ID, in.Facultad, in.FacultadCiudad)
 	}
 	return a.store.Get(in.ID)
 }
@@ -181,7 +183,7 @@ func (a *App) SaveConvenioTags(id int64, tagIDs []int64) (store.ConventionDetail
 		return store.ConventionDetail{}, err
 	}
 	if d, err := a.store.Get(id); err == nil && strings.TrimSpace(d.Facultad) != "" {
-		_ = a.ensureFacultyTag(id, d.Facultad, "")
+		_ = a.ensureFacultyTag(id, d.Facultad, d.FacultadCiudad)
 	}
 	return a.store.Get(id)
 }
@@ -192,7 +194,7 @@ func (a *App) AcceptSuggestions(id int64) (store.ConventionDetail, error) {
 		return store.ConventionDetail{}, err
 	}
 	if d, err := a.store.Get(id); err == nil && strings.TrimSpace(d.Facultad) != "" {
-		_ = a.ensureFacultyTag(id, d.Facultad, "")
+		_ = a.ensureFacultyTag(id, d.Facultad, d.FacultadCiudad)
 	}
 	return a.store.Get(id)
 }
@@ -351,6 +353,7 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 		FirmanteUAGro:       res.FirmanteUAGro,
 		CargoUAGro:          res.CargoUAGro,
 		Facultad:            res.Facultad,
+		FacultadCiudad:      res.FacultadCiudad,
 		FechaFirma:          res.FechaFirma,
 		FechaVigencia:       res.FechaVigencia,
 		VigenciaIndefinida:  res.VigenciaIndefinida,
@@ -366,48 +369,35 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 		return store.ConventionDetail{}, err
 	}
 	if strings.TrimSpace(res.Facultad) != "" {
-		city := ""
-		for _, sug := range res.Sugerencias {
-			if sug.Tipo == "ciudad" {
-				city = sug.Nombre
-				break
-			}
-		}
-		_ = a.ensureFacultyTag(id, res.Facultad, city)
+		_ = a.ensureFacultyTag(id, res.Facultad, res.FacultadCiudad)
 	}
 	return a.store.Get(id)
 }
 
 // ensureFacultyTag crea, si hace falta, la etiqueta de tipo facultad con el
-// formato "Facultad de <nombre> <ciudad>" y la agrega al convenio.
-func (a *App) ensureFacultyTag(id int64, facultad, city string) error {
-	facultad = strings.TrimSpace(facultad)
-	if facultad == "" {
+// formato "Facultad de <nombre> <ciudad>". La ciudad es la sede de la facultad
+// de la UAGro, nunca la ciudad de la dependencia.
+func (a *App) ensureFacultyTag(id int64, facultad, facultadCiudad string) error {
+	name, city, ok := uagro.Resolve(facultad, facultadCiudad)
+	if !ok {
 		return nil
 	}
+	if strings.TrimSpace(facultadCiudad) == "" {
+		_ = a.store.SetFacultyCity(id, city)
+	}
+	tagName := strings.TrimSpace(name + " " + city)
 	tags, err := a.store.TagsForConvention(id)
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(city) == "" {
-		for _, t := range tags {
-			if t.Tipo == "ciudad" {
-				city = t.Nombre
-				break
-			}
-		}
-	}
-	if strings.TrimSpace(city) == "" {
-		// Sin ciudad no se puede construir el nombre exigido.
-		return nil
-	}
-	name := facultyTagName(facultad, city)
 	ids := make([]int64, 0, len(tags)+1)
+	oldFaculties := make([]int64, 0, 1)
 	for _, t := range tags {
 		if t.Tipo == "facultad" {
-			if strings.EqualFold(t.Nombre, name) {
+			if strings.EqualFold(t.Nombre, tagName) {
 				return nil
 			}
+			oldFaculties = append(oldFaculties, t.ID)
 			continue
 		}
 		ids = append(ids, t.ID)
@@ -419,44 +409,53 @@ func (a *App) ensureFacultyTag(id int64, facultad, city string) error {
 	var tag store.Tag
 	found := false
 	for _, t := range all {
-		if t.Tipo == "facultad" && strings.EqualFold(t.Nombre, name) {
+		if t.Tipo == "facultad" && strings.EqualFold(t.Nombre, tagName) {
 			tag, found = t, true
 			break
 		}
 	}
 	if !found {
-		tag, err = a.store.CreateTag(store.TagInput{Nombre: name, Tipo: "facultad", Color: store.ColorFacultad})
+		tag, err = a.store.CreateTag(store.TagInput{Nombre: tagName, Tipo: "facultad", Color: store.ColorFacultad})
 		if err != nil {
 			return err
 		}
 	}
 	ids = append(ids, tag.ID)
-	return a.store.ReplaceTags(id, ids, false)
+	if err := a.store.ReplaceTags(id, ids, false); err != nil {
+		return err
+	}
+	for _, old := range oldFaculties {
+		_ = a.store.DeleteTagIfUnused(old)
+	}
+	return nil
 }
 
-// facultyTagName aplica el formato solicitado: Facultad de <nombre> <ciudad>.
-// Si el nombre ya incluye "Facultad de" o la ciudad, no se duplican.
-func facultyTagName(facultad, city string) string {
-	name := strings.Join(strings.Fields(strings.TrimSpace(facultad)), " ")
-	lower := strings.ToLower(name)
-	if strings.HasPrefix(lower, "facultad de ") {
-		name = "Facultad de " + strings.TrimSpace(name[len("facultad de "):])
-	} else if strings.HasPrefix(lower, "facultad ") {
-		name = "Facultad de " + strings.TrimSpace(name[len("facultad "):])
-	} else {
-		name = "Facultad de " + name
+// repairFacultyTags corrige etiquetas antiguas que se construyeron con la
+// ciudad de la dependencia (por ejemplo, "Turismo Tijuana").
+func (a *App) repairFacultyTags() {
+	rows, err := a.store.DB().Query("SELECT id, facultad, facultad_ciudad FROM convenios WHERE trim(facultad) <> ''")
+	if err != nil {
+		log.Printf("no se pudieron revisar etiquetas de facultad: %v", err)
+		return
 	}
-	city = strings.Join(strings.Fields(strings.TrimSpace(city)), " ")
-	if city != "" && !strings.Contains(strings.ToLower(name), strings.ToLower(city)) {
-		name += " " + city
+	type row struct {
+		id     int64
+		fac    string
+		ciudad string
 	}
-	// El catálogo admite 80 caracteres; conserva el final (ciudad) si hay que recortar.
-	r := []rune(name)
-	if len(r) > 80 {
-		name = string(r[len(r)-80:])
-		name = strings.TrimSpace(name)
+	var pendientes []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.fac, &r.ciudad); err == nil {
+			pendientes = append(pendientes, r)
+		}
 	}
-	return name
+	rows.Close()
+	for _, r := range pendientes {
+		if err := a.ensureFacultyTag(r.id, r.fac, r.ciudad); err != nil {
+			log.Printf("no se pudo corregir la etiqueta de facultad del convenio %d: %v", r.id, err)
+		}
+	}
 }
 
 // BeginTranscription prepara la transcripción de las páginas escaneadas.

@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS convenios (
   firmante_uagro          TEXT NOT NULL DEFAULT '',
   cargo_uagro             TEXT NOT NULL DEFAULT '',
   facultad                TEXT NOT NULL DEFAULT '',
+  facultad_ciudad         TEXT NOT NULL DEFAULT '',
   fecha_firma             TEXT,
   fecha_vigencia          TEXT,
   vigencia_indefinida     INTEGER NOT NULL DEFAULT 0,

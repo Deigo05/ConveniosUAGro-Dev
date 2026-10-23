@@ -41,6 +41,7 @@ type Extraction struct {
 	FirmanteUAGro       string
 	CargoUAGro          string
 	Facultad            string
+	FacultadCiudad      string
 	FechaFirma          string
 	FechaVigencia       string
 	VigenciaIndefinida  bool
@@ -138,6 +139,7 @@ Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional ni bloques 
   "firmante_uagro": string|null,
   "cargo_uagro": string|null,
   "facultad": string|null,
+  "facultad_ciudad": string|null,
   "fecha_firma": "YYYY-MM-DD"|null,
   "fecha_firma_texto": string|null,
   "vigencia_tipo": "fecha_exacta"|"duracion"|"indefinida"|"no_encontrada",
@@ -153,7 +155,8 @@ Reglas:
 - "dependencia": nombre oficial completo de la institución, dependencia u organismo contraparte con quien la UAGro celebra el convenio. NUNCA la propia UAGro ni sus facultades. Si hay varias contrapartes, sepáralas con "; ".
 - "firmante_dependencia" y "cargo_dependencia": nombre completo y cargo de la persona que firma por la dependencia u organismo contraparte. Búscalos al final del documento, junto a firmas y sellos.
 - "firmante_uagro" y "cargo_uagro": nombre completo y cargo de la persona que firma por la UAGro o por la facultad universitaria.
-- "facultad": nombre oficial de la facultad, escuela o unidad académica de la UAGro que celebra el convenio. Incluye el número (01, 02, etc.) si forma parte del nombre. No incluyas la ciudad; el sistema la añade. Si no aparece, usa null.
+- "facultad": nombre oficial de la facultad, escuela o unidad académica de la UAGro que celebra el convenio. Incluye el número (01, 02, etc.) si forma parte del nombre. No incluyas la ciudad; usa "facultad_ciudad" para eso. Si no aparece, usa null.
+- "facultad_ciudad": ciudad o sede donde se ubica esa facultad de la UAGro. No es la ciudad de la dependencia ni de la contraparte. Ejemplo: si el documento dice "FACULTAD DE TURISMO ACAPULCO" y la contraparte está en Tijuana, facultad_ciudad debe ser "Acapulco". Si no hay certeza, usa null.
 - "fecha_firma": fecha de firma. Convierte fechas escritas en palabras o con meses en español a YYYY-MM-DD. "fecha_firma_texto": fragmento literal.
 - Vigencia:
   - Fecha de término concreta: vigencia_tipo="fecha_exacta" y "fecha_vigencia".
@@ -373,6 +376,7 @@ func interpret(raw map[string]interface{}, catalogo []Tag) (Extraction, error) {
 	out.FirmanteUAGro = truncate(get("firmante_uagro"), 200)
 	out.CargoUAGro = truncate(get("cargo_uagro"), 200)
 	out.Facultad = truncate(get("facultad"), 200)
+	out.FacultadCiudad = truncate(get("facultad_ciudad"), 100)
 	out.VigenciaTexto = truncate(get("vigencia_texto"), 500)
 	notas := []string{}
 	if n := get("notas"); n != "" {

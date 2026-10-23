@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestMigrationV1ToV4(t *testing.T) {
+func TestMigrationV1ToV5(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("CONVENIOS_DATA_DIR", dir)
 	paths, err := DefaultPaths()
@@ -58,7 +58,7 @@ func TestMigrationV1ToV4(t *testing.T) {
 	if err := st.DB().QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
+	if version != 5 {
 		t.Fatalf("user_version = %d", version)
 	}
 	d, err := st.Get(1)

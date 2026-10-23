@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.5] - 2026-10-23
+
+### Corregido
+
+- La etiqueta de facultad ya no usa la ciudad de la dependencia. Ahora usa la ciudad/sede de la facultad de la UAGro.
+- La extracción devuelve `facultad_ciudad` por separado y la ficha permite corregirla.
+- Se agregó un catálogo de facultades y sedes de la UAGro para validar y normalizar nombres.
+- Se reparan automáticamente etiquetas antiguas como “Facultad de Turismo Tijuana” a “Facultad de Turismo Acapulco”.
+- Migración de base al esquema 5 con `facultad_ciudad`.
+
 ## [1.1.4] - 2026-10-23
 
 ### Cambiado
@@ -7,7 +17,7 @@
 - Solo se permite **una etiqueta de ciudad** por convenio. La IA sugiere como máximo una y debe ser la ciudad de la dependencia, no la de la UAGro.
 - Las etiquetas de facultad ahora son un **tipo propio** (`facultad`), separado de Tema / Rubro.
 - El nombre de la etiqueta de facultad sigue el formato `Facultad de <nombre> <ciudad>`, conservando el número (01, 02, etc.) cuando forma parte del nombre.
-- La etiqueta de facultad se actualiza al aceptar sugerencias, cambiar la ciudad o editar la facultad.
+- La etiqueta de facultad se actualiza al aceptar sugerencias, cambiar la ciudad de la facultad o editar la facultad.
 
 ### Corregido
 
