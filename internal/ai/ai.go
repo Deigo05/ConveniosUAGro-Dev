@@ -153,7 +153,7 @@ Reglas:
 - "dependencia": nombre oficial completo de la institución, dependencia u organismo contraparte con quien la UAGro celebra el convenio. NUNCA la propia UAGro ni sus facultades. Si hay varias contrapartes, sepáralas con "; ".
 - "firmante_dependencia" y "cargo_dependencia": nombre completo y cargo de la persona que firma por la dependencia u organismo contraparte. Búscalos al final del documento, junto a firmas y sellos.
 - "firmante_uagro" y "cargo_uagro": nombre completo y cargo de la persona que firma por la UAGro o por la facultad universitaria.
-- "facultad": nombre oficial de la facultad, escuela o unidad académica de la UAGro que celebra el convenio. Incluye el número (01, 02, etc.) si forma parte del nombre. Si no aparece, usa null.
+- "facultad": nombre oficial de la facultad, escuela o unidad académica de la UAGro que celebra el convenio. Incluye el número (01, 02, etc.) si forma parte del nombre. No incluyas la ciudad; el sistema la añade. Si no aparece, usa null.
 - "fecha_firma": fecha de firma. Convierte fechas escritas en palabras o con meses en español a YYYY-MM-DD. "fecha_firma_texto": fragmento literal.
 - Vigencia:
   - Fecha de término concreta: vigencia_tipo="fecha_exacta" y "fecha_vigencia".
