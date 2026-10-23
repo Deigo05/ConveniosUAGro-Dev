@@ -544,6 +544,11 @@ function renderDetail() {
   $('#pdf-frame').src = `/pdf/${c.id}?v=${Date.now()}`;
 
   $('#f-dependencia').value = c.dependencia || '';
+  $('#f-firmante-dependencia').value = c.firmante_dependencia || '';
+  $('#f-cargo-dependencia').value = c.cargo_dependencia || '';
+  $('#f-firmante-uagro').value = c.firmante_uagro || '';
+  $('#f-cargo-uagro').value = c.cargo_uagro || '';
+  $('#f-facultad').value = c.facultad || '';
   $('#f-firma').value = c.fecha_firma || '';
   $('#f-vigencia').value = c.fecha_vigencia || '';
   $('#f-vigencia-texto').value = c.vigencia_texto || '';
@@ -621,7 +626,7 @@ function renderTagSelector() {
   const html = TYPE_ORDER.map(tipo => {
     const tags = state.tags.filter(t => t.tipo === tipo);
     return `<fieldset>
-      <legend>${TYPE_LABEL[tipo]}</legend>
+      <legend>${TYPE_LABEL[tipo]}${tipo === 'ciudad' ? ' · puedes elegir varias' : ''}</legend>
       <div class="tag-selector__list">
         ${tags.length ? tags.map(t => `
           <label class="tag-selector__item">
@@ -652,6 +657,11 @@ async function saveConvenio(e) {
   const in_ = {
     id: c.id,
     dependencia: $('#f-dependencia').value.trim(),
+    firmante_dependencia: $('#f-firmante-dependencia').value.trim(),
+    cargo_dependencia: $('#f-cargo-dependencia').value.trim(),
+    firmante_uagro: $('#f-firmante-uagro').value.trim(),
+    cargo_uagro: $('#f-cargo-uagro').value.trim(),
+    facultad: $('#f-facultad').value.trim(),
     fecha_firma: $('#f-firma').value,
     fecha_vigencia: $('#f-indefinida').checked ? '' : $('#f-vigencia').value,
     vigencia_indefinida: $('#f-indefinida').checked,
@@ -886,12 +896,13 @@ async function processAutoFile(id) {
   if (!state.config.ai_enabled) return;
   const necesitaTranscripcion = (c.es_escaneado && c.transcripcion_estado !== 'completa') ||
     Number(c.paginas_por_transcribir || 0) > 0;
+  let transcrito = false;
   if (necesitaTranscripcion) {
     await transcribeConvention(id, { auto: true });
     c = await call('GetConvenio', id);
-    showToast('Transcripción completa. Extrayendo datos con IA…', 'info');
+    transcrito = true;
   }
-  if (c.texto && c.texto.trim()) {
+  if (!transcrito && c.texto && c.texto.trim()) {
     setAIActivity('IA: extrayendo datos…');
     await call('ExtractAI', id);
   }
@@ -989,6 +1000,21 @@ async function transcribeConvention(id, options = {}) {
     }
     await refreshData();
     await loadList();
+    if (state.config.ai_enabled && state.config.has_api_key) {
+      setAIActivity('IA: extrayendo datos…');
+      try {
+        await call('ExtractAI', id);
+        if (state.current?.id === id) {
+          state.current = await call('GetConvenio', id);
+          renderDetail();
+        }
+        await refreshData();
+        await loadList();
+        showToast('Transcripción completa. Datos extraídos automáticamente.', 'success');
+      } catch (err) {
+        showToast('Transcripción completa, pero la extracción automática falló: ' + errorText(err), 'error');
+      }
+    }
   } catch (err) {
     try { await call('FailTranscription', id, errorText(err)); } catch (_) {}
     if (state.current?.id === id) {
@@ -1250,6 +1276,7 @@ async function deleteTag(tag) {
 function renderSettings() {
   const c = state.config || {};
   $('#settings-ai-enabled').checked = Boolean(c.ai_enabled);
+  $('#settings-web-search').checked = c.web_search_enabled !== false;
   $('#settings-api-key').value = '';
   $('#settings-api-key').placeholder = c.has_api_key ? 'Clave guardada (deja vacío para conservarla)' : 'Pega aquí tu clave';
   $('#settings-key-hint').textContent = c.has_api_key ? `Guardada: ${c.api_key_hint || '••••'}` : 'Sin clave configurada';
@@ -1267,6 +1294,7 @@ async function saveSettings(e) {
   try {
     const view = await call('SaveSettings', {
       ai_enabled: $('#settings-ai-enabled').checked,
+      web_search_enabled: $('#settings-web-search').checked,
       api_key: $('#settings-api-key').value.trim(),
       clear_api_key: false,
       base_url: $('#settings-base-url').value.trim(),

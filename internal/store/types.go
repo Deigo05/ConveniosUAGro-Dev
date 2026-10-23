@@ -23,6 +23,11 @@ type Suggestion struct {
 type ConventionSummary struct {
 	ID                    int64  `json:"id"`
 	Dependencia           string `json:"dependencia"`
+	FirmanteDependencia   string `json:"firmante_dependencia"`
+	CargoDependencia      string `json:"cargo_dependencia"`
+	FirmanteUAGro         string `json:"firmante_uagro"`
+	CargoUAGro            string `json:"cargo_uagro"`
+	Facultad              string `json:"facultad"`
 	FechaFirma            string `json:"fecha_firma"`
 	FechaVigencia         string `json:"fecha_vigencia"`
 	VigenciaIndefinida    bool   `json:"vigencia_indefinida"`
@@ -99,14 +104,19 @@ type Stats struct {
 
 // ConventionInput es lo que envía el formulario de edición.
 type ConventionInput struct {
-	ID                 int64  `json:"id"`
-	Dependencia        string `json:"dependencia"`
-	FechaFirma         string `json:"fecha_firma"`
-	FechaVigencia      string `json:"fecha_vigencia"`
-	VigenciaIndefinida bool   `json:"vigencia_indefinida"`
-	VigenciaCalculada  bool   `json:"vigencia_calculada"`
-	VigenciaTexto      string `json:"vigencia_texto"`
-	Notas              string `json:"notas"`
+	ID                  int64  `json:"id"`
+	Dependencia         string `json:"dependencia"`
+	FirmanteDependencia string `json:"firmante_dependencia"`
+	CargoDependencia    string `json:"cargo_dependencia"`
+	FirmanteUAGro       string `json:"firmante_uagro"`
+	CargoUAGro          string `json:"cargo_uagro"`
+	Facultad            string `json:"facultad"`
+	FechaFirma          string `json:"fecha_firma"`
+	FechaVigencia       string `json:"fecha_vigencia"`
+	VigenciaIndefinida  bool   `json:"vigencia_indefinida"`
+	VigenciaCalculada   bool   `json:"vigencia_calculada"`
+	VigenciaTexto       string `json:"vigencia_texto"`
+	Notas               string `json:"notas"`
 }
 
 // TagInput se usa para crear o editar una etiqueta.

@@ -176,7 +176,9 @@ func (s *Store) List(f ListFilter) (ListResult, error) {
 		order = "bm25(convenios_fts), c.id DESC"
 	}
 	offset := (f.Page - 1) * pageSize
-	query := `SELECT c.id, c.dependencia, coalesce(c.fecha_firma,''), coalesce(c.fecha_vigencia,''),
+	query := `SELECT c.id, c.dependencia, coalesce(c.firmante_dependencia,''), coalesce(c.cargo_dependencia,''),
+		coalesce(c.firmante_uagro,''), coalesce(c.cargo_uagro,''), coalesce(c.facultad,''),
+		coalesce(c.fecha_firma,''), coalesce(c.fecha_vigencia,''),
 		c.vigencia_indefinida, c.vigencia_calculada, c.archivo_nombre_original, c.paginas,
 		c.es_escaneado, c.ia_estado, c.ia_error, c.etiquetas_revisadas,
 		c.transcripcion_estado, c.transcripcion_error, c.paginas_por_transcribir,
@@ -199,7 +201,9 @@ func (s *Store) List(f ListFilter) (ListResult, error) {
 	for rows.Next() {
 		var c ConventionSummary
 		var indef, calc, scanned, revisadas int
-		if err := rows.Scan(&c.ID, &c.Dependencia, &c.FechaFirma, &c.FechaVigencia,
+		if err := rows.Scan(&c.ID, &c.Dependencia, &c.FirmanteDependencia, &c.CargoDependencia,
+			&c.FirmanteUAGro, &c.CargoUAGro, &c.Facultad,
+			&c.FechaFirma, &c.FechaVigencia,
 			&indef, &calc, &c.ArchivoNombreOriginal, &c.Paginas, &scanned,
 			&c.IAEstado, &c.IAError, &revisadas, &c.TranscripcionEstado,
 			&c.TranscripcionError, &c.PaginasPorTranscribir, &c.PaginasTranscritas,
@@ -280,14 +284,16 @@ func (s *Store) Get(id int64) (ConventionDetail, error) {
 	var fechaFirma, fechaVigencia sql.NullString
 	var sugerenciasRaw, textoPDF string
 	err := s.db.QueryRow(`
-		SELECT id, dependencia, fecha_firma, fecha_vigencia, vigencia_indefinida,
+		SELECT id, dependencia, firmante_dependencia, cargo_dependencia, firmante_uagro,
+		       cargo_uagro, facultad, fecha_firma, fecha_vigencia, vigencia_indefinida,
 		       vigencia_texto, vigencia_calculada, notas, archivo_nombre_original,
 		       archivo_guardado, archivo_bytes, archivo_sha256, paginas, es_escaneado,
 		       texto_pdf, texto, ia_estado, ia_error, etiquetas_sugeridas, etiquetas_revisadas,
 		       transcripcion_estado, transcripcion_error, paginas_por_transcribir,
 		       paginas_transcritas, creado_en, actualizado_en
 		FROM convenios WHERE id=?`, id).Scan(
-		&c.ID, &c.Dependencia, &fechaFirma, &fechaVigencia, &indef,
+		&c.ID, &c.Dependencia, &c.FirmanteDependencia, &c.CargoDependencia, &c.FirmanteUAGro,
+		&c.CargoUAGro, &c.Facultad, &fechaFirma, &fechaVigencia, &indef,
 		&c.VigenciaTexto, &calc, &c.Notas, &c.ArchivoNombreOriginal,
 		&c.ArchivoGuardado, &c.ArchivoBytes, &c.ArchivoSHA256, &c.Paginas, &scanned,
 		&textoPDF, &c.Texto, &c.IAEstado, &c.IAError, &sugerenciasRaw, &revisadas,
@@ -324,11 +330,15 @@ func (s *Store) Update(in ConventionInput) error {
 		return errors.New("las fechas deben tener el formato AAAA-MM-DD y un año entre 1950 y 2100")
 	}
 	_, err := s.db.Exec(`
-		UPDATE convenios SET dependencia=?, fecha_firma=?, fecha_vigencia=?,
+		UPDATE convenios SET dependencia=?, firmante_dependencia=?, cargo_dependencia=?,
+			firmante_uagro=?, cargo_uagro=?, facultad=?, fecha_firma=?, fecha_vigencia=?,
 			vigencia_indefinida=?, vigencia_calculada=0, vigencia_texto=?, notas=?,
 			actualizado_en=datetime('now')
 		WHERE id=?`,
-		strings.TrimSpace(in.Dependencia), nullIfEmpty(in.FechaFirma), nullIfEmpty(in.FechaVigencia),
+		strings.TrimSpace(in.Dependencia), strings.TrimSpace(in.FirmanteDependencia),
+		strings.TrimSpace(in.CargoDependencia), strings.TrimSpace(in.FirmanteUAGro),
+		strings.TrimSpace(in.CargoUAGro), strings.TrimSpace(in.Facultad),
+		nullIfEmpty(in.FechaFirma), nullIfEmpty(in.FechaVigencia),
 		boolInt(in.VigenciaIndefinida), strings.TrimSpace(in.VigenciaTexto), strings.TrimSpace(in.Notas), in.ID)
 	return err
 }
@@ -360,12 +370,16 @@ func (s *Store) SetAIResult(id int64, in ConventionInput, estado string, sugeren
 		data = b
 	}
 	_, err := s.db.Exec(`
-		UPDATE convenios SET dependencia=?, fecha_firma=?, fecha_vigencia=?,
+		UPDATE convenios SET dependencia=?, firmante_dependencia=?, cargo_dependencia=?,
+			firmante_uagro=?, cargo_uagro=?, facultad=?, fecha_firma=?, fecha_vigencia=?,
 			vigencia_indefinida=?, vigencia_calculada=?, vigencia_texto=?, notas=?,
 			ia_estado=?, ia_error='', etiquetas_sugeridas=?, etiquetas_revisadas=0,
 			actualizado_en=datetime('now')
 		WHERE id=?`,
-		strings.TrimSpace(in.Dependencia), nullIfEmpty(in.FechaFirma), nullIfEmpty(in.FechaVigencia),
+		strings.TrimSpace(in.Dependencia), strings.TrimSpace(in.FirmanteDependencia),
+		strings.TrimSpace(in.CargoDependencia), strings.TrimSpace(in.FirmanteUAGro),
+		strings.TrimSpace(in.CargoUAGro), strings.TrimSpace(in.Facultad),
+		nullIfEmpty(in.FechaFirma), nullIfEmpty(in.FechaVigencia),
 		boolInt(in.VigenciaIndefinida), boolInt(in.VigenciaCalculada), strings.TrimSpace(in.VigenciaTexto),
 		strings.TrimSpace(in.Notas+" "+notas), estado, data, id)
 	return err
