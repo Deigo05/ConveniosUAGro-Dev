@@ -115,6 +115,20 @@ func TestExtractSignatoriesFacultyAndFacultyTag(t *testing.T) {
 	if !found {
 		t.Fatalf("no se creó la etiqueta de facultad: %+v", tags)
 	}
+	if !res.EtiquetasRevisadas || len(res.EtiquetasSugeridas) != 0 {
+		t.Fatalf("las sugerencias no se aplicaron automáticamente: %+v", res)
+	}
+	for _, name := range []string{"Nacional", "Guerrero", "Acapulco"} {
+		found := false
+		for _, tag := range tags {
+			if tag.Nombre == name {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("falta la etiqueta %q: %+v", name, tags)
+		}
+	}
 }
 
 func TestRepairFacultyTagUsesFacultyCityNotDependencyCity(t *testing.T) {

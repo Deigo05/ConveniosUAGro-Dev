@@ -25,7 +25,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.1.5"
+const appVersion = "1.1.6"
 
 // App es el puente entre la interfaz y la base local.
 type App struct {
@@ -74,6 +74,7 @@ func NewApp() (*App, error) {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.applyPendingSuggestions()
 	a.repairFacultyTags()
 }
 
@@ -368,6 +369,15 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 	if err := a.store.SetAIResult(id, in, res.Estado, sugs, ""); err != nil {
 		return store.ConventionDetail{}, err
 	}
+	// Las etiquetas sugeridas se aplican automáticamente; no hay paso de
+	// aprobación para el usuario.
+	if len(sugs) > 0 {
+		if err := a.store.AcceptSuggestions(id); err != nil {
+			return store.ConventionDetail{}, err
+		}
+	} else {
+		_ = a.store.MarkTagsReviewed(id)
+	}
 	if strings.TrimSpace(res.Facultad) != "" {
 		_ = a.ensureFacultyTag(id, res.Facultad, res.FacultadCiudad)
 	}
@@ -428,6 +438,28 @@ func (a *App) ensureFacultyTag(id int64, facultad, facultadCiudad string) error 
 		_ = a.store.DeleteTagIfUnused(old)
 	}
 	return nil
+}
+
+// applyPendingSuggestions aplica automáticamente sugerencias pendientes de
+// versiones anteriores, para que el usuario no tenga que aprobarlas.
+func (a *App) applyPendingSuggestions() {
+	rows, err := a.store.DB().Query("SELECT id FROM convenios WHERE etiquetas_revisadas=0 AND trim(etiquetas_sugeridas) <> ''")
+	if err != nil {
+		return
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	for _, id := range ids {
+		if err := a.store.AcceptSuggestions(id); err != nil {
+			log.Printf("no se pudieron aplicar sugerencias del convenio %d: %v", id, err)
+		}
+	}
 }
 
 // repairFacultyTags corrige etiquetas antiguas que se construyeron con la

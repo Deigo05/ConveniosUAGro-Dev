@@ -34,6 +34,8 @@ No hay que instalar un servidor ni iniciar sesión. Todo funciona en la PC.
 - Visor de PDF integrado y **descarga del PDF** con diálogo Guardar como.
 - **Transcripción de páginas escaneadas** con el modelo de visión del servicio externo; el texto se guarda por página y se integra a la búsqueda.
 - Si la IA está activa, la extracción y la transcripción **comienzan automáticamente al confirmar la importación**. También se extraen los datos al terminar una transcripción manual.
+- Al importar, la app **permanece en la lista de convenios**; el avance de transcripción/análisis aparece en la misma pantalla.
+- Las etiquetas sugeridas por la IA se aplican automáticamente, sin aprobación manual.
 - Si faltan ciudad o estado, el modelo puede consultar DuckDuckGo para confirmar la ubicación.
 - Respaldo completo en un archivo ZIP (base de datos + PDF).
 - Análisis opcional con IA para extraer dependencia, fechas y etiquetas desde PDF con texto.
@@ -130,6 +132,6 @@ Para restaurar:
 
 ## Estado de la entrega
 
-- Versión: 1.1.5
+- Versión: 1.1.6
 - Base inicial: vacía (solo se crean las etiquetas base Nacional/Internacional y los 32 estados).
 - Sin datos de producción ni credenciales.
