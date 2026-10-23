@@ -126,6 +126,6 @@ Para restaurar:
 
 ## Estado de la entrega
 
-- Versión: 1.1.1
+- Versión: 1.1.2
 - Base inicial: vacía (solo se crean las etiquetas base Nacional/Internacional y los 32 estados).
 - Sin datos de producción ni credenciales.

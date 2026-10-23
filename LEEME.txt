@@ -1,4 +1,4 @@
-CONVENIOS UAGRO · 1.1.1
+CONVENIOS UAGRO · 1.1.2
 Aplicación de escritorio para gestionar convenios
 
 QUÉ ES

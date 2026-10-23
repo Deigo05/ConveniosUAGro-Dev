@@ -889,6 +889,7 @@ async function processAutoFile(id) {
   if (necesitaTranscripcion) {
     await transcribeConvention(id, { auto: true });
     c = await call('GetConvenio', id);
+    showToast('Transcripción completa. Extrayendo datos con IA…', 'info');
   }
   if (c.texto && c.texto.trim()) {
     setAIActivity('IA: extrayendo datos…');
