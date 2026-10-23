@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Convenios UAGro</title>
+  <link rel="icon" href="assets/escudo.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app-shell" id="app">
+  <aside class="sidebar">
+    <div class="brand">
+      <img src="assets/escudo.png" alt="Escudo UAGro" class="brand__logo">
+      <div class="brand__text">
+        <strong>Convenios</strong>
+        <span>Universidad Autónoma<br>de Guerrero</span>
+      </div>
+    </div>
+
+    <nav class="nav" aria-label="Navegación principal">
+      <button class="nav__item is-active" data-view="convenios" id="nav-convenios">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h11l5 5v11H4V4Zm11 1.5V9h3.5M7 12h10M7 16h10"/></svg>
+        <span>Convenios</span>
+        <span class="nav__badge" id="nav-count">0</span>
+      </button>
+      <button class="nav__item" data-view="etiquetas" id="nav-etiquetas">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
+        <span>Etiquetas</span>
+      </button>
+      <button class="nav__item" data-view="ajustes" id="nav-ajustes">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="m19 13.5 1.6 1.2-1.8 3.1-1.9-.7a7 7 0 0 1-1.8 1l-.3 2h-3.6l-.3-2a7 7 0 0 1-1.8-1l-1.9.7-1.8-3.1L7 13.5a7 7 0 0 1 0-2.1L5.4 10l1.8-3.1 1.9.7a7 7 0 0 1 1.8-1l.3-2h3.6l.3 2a7 7 0 0 1 1.8 1l1.9-.7L20.6 10 19 11.4a7 7 0 0 1 0 2.1Z"/></svg>
+        <span>Ajustes</span>
+      </button>
+    </nav>
+
+    <div class="sidebar__footer">
+      <div class="local-note">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+        <div><strong>Datos locales</strong><span>Todo se guarda en tu PC</span></div>
+      </div>
+      <span class="version">Versión 1.1.0</span>
+    </div>
+  </aside>
+
+  <div class="workspace">
+    <header class="topbar">
+      <div class="topbar__titles">
+        <h1 id="page-title">Convenios</h1>
+        <p id="page-subtitle">Administra y consulta los convenios de la UAGro.</p>
+      </div>
+      <div class="topbar__actions">
+        <button class="btn btn--ghost btn--icon" id="btn-settings-top" title="Ajustes" aria-label="Ajustes">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="m19 13.5 1.6 1.2-1.8 3.1-1.9-.7a7 7 0 0 1-1.8 1l-.3 2h-3.6l-.3-2a7 7 0 0 1-1.8-1l-1.9.7-1.8-3.1L7 13.5a7 7 0 0 1 0-2.1L5.4 10l1.8-3.1 1.9.7a7 7 0 0 1 1.8-1l.3-2h3.6l.3 2a7 7 0 0 1 1.8 1l1.9-.7L20.6 10 19 11.4a7 7 0 0 1 0 2.1Z"/></svg>
+        </button>
+        <button class="btn btn--primary" id="btn-import-top">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 20h14"/></svg>
+          Importar PDF
+        </button>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="view" id="view-convenios">
+        <div class="stats-grid">
+          <article class="stat-card">
+            <span class="stat-card__label">Convenios</span>
+            <strong id="stats-total">0</strong>
+            <span class="stat-card__hint">registrados en total</span>
+          </article>
+          <article class="stat-card stat-card--green">
+            <span class="stat-card__label">Vigentes</span>
+            <strong id="stats-vigentes">0</strong>
+            <span class="stat-card__hint">incluye vigencia indefinida</span>
+          </article>
+          <article class="stat-card stat-card--amber">
+            <span class="stat-card__label">Por vencer</span>
+            <strong id="stats-por-vencer">0</strong>
+            <span class="stat-card__hint">en los próximos 90 días</span>
+          </article>
+          <article class="stat-card stat-card--red">
+            <span class="stat-card__label">Vencidos</span>
+            <strong id="stats-vencidos">0</strong>
+            <span class="stat-card__hint">fuera de vigencia</span>
+          </article>
+        </div>
+
+        <section class="panel panel--list">
+          <div class="toolbar">
+            <label class="search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.2 4.2"/></svg>
+              <input type="search" id="search" placeholder="Buscar dependencia, texto del PDF, notas…" autocomplete="off" maxlength="200">
+              <button type="button" class="search__clear" id="btn-search-clear" aria-label="Limpiar búsqueda" hidden>×</button>
+            </label>
+            <label class="select-wrap">
+              <span class="sr-only">Vigencia</span>
+              <select id="filter-vigencia">
+                <option value="">Todas las vigencias</option>
+                <option value="vigentes">Vigentes</option>
+                <option value="no_vigentes">No vigentes</option>
+                <option value="sin_fecha">Sin fecha</option>
+              </select>
+            </label>
+            <button class="btn btn--outline" id="btn-tag-filter" aria-expanded="false">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.2"/></svg>
+              Etiquetas
+              <span class="badge badge--blue" id="tag-filter-count" hidden>0</span>
+            </button>
+            <button class="btn btn--outline" id="btn-pending" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6l-8-3Z"/><path d="M9 12h6M9 8h6"/></svg>
+              Clasificar
+              <span class="badge badge--amber" id="pending-count">0</span>
+            </button>
+            <button class="btn btn--text" id="btn-clear-filters" hidden>Limpiar filtros</button>
+            <div class="toolbar__spacer"></div>
+            <label class="select-wrap select-wrap--small">
+              <span class="sr-only">Ordenar</span>
+              <select id="sort-select">
+                <option value="id">Más recientes</option>
+                <option value="dependencia">Dependencia</option>
+                <option value="fecha_firma">Fecha de firma</option>
+                <option value="fecha_vigencia">Fecha de vigencia</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="tag-filter" id="tag-filter-panel" hidden>
+            <div class="tag-filter__head">
+              <strong>Filtrar por etiquetas</strong>
+              <span class="muted">Dentro de un grupo se muestra cualquiera; entre grupos se exigen todas.</span>
+            </div>
+            <div class="tag-filter__groups" id="tag-filter-groups"></div>
+          </div>
+
+          <div class="bulk-bar" id="bulk-bar" hidden>
+            <span id="bulk-count">0 seleccionados</span>
+            <button class="btn btn--danger btn--small" id="btn-bulk-delete">Eliminar seleccionados</button>
+            <button class="btn btn--text btn--small" id="btn-bulk-clear">Quitar selección</button>
+          </div>
+
+          <div id="list-area" aria-live="polite"></div>
+          <div class="list-footer">
+            <span class="muted" id="list-summary"></span>
+            <nav class="pagination" id="pagination" aria-label="Paginación"></nav>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="view-detail" hidden>
+        <button class="back-link" id="detail-back">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+          Volver a convenios
+        </button>
+
+        <div class="detail-heading">
+          <div>
+            <div class="heading-row">
+              <h1 id="detail-title">Convenio</h1>
+              <span class="badge" id="detail-state-badge"></span>
+            </div>
+            <p id="detail-subtitle" class="muted"></p>
+          </div>
+          <div class="detail-actions">
+            <button class="btn btn--outline" id="btn-download">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
+              Descargar PDF
+            </button>
+            <button class="btn btn--danger-text" id="btn-delete">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"/></svg>
+              Eliminar
+            </button>
+          </div>
+        </div>
+
+        <div class="banner banner--info" id="detail-ai-banner" hidden></div>
+
+        <div class="detail-grid">
+          <section class="card pdf-card">
+            <div class="card__head">
+              <div>
+                <h2>Documento original</h2>
+                <p class="muted" id="pdf-caption"></p>
+              </div>
+              <span class="badge" id="pdf-badge"></span>
+            </div>
+            <div class="pdf-frame-wrap">
+              <iframe id="pdf-frame" title="Vista previa del PDF"></iframe>
+            </div>
+          </section>
+
+          <section class="card form-card">
+            <div class="card__head">
+              <h2>Datos del convenio</h2>
+              <span class="badge" id="detail-classification"></span>
+            </div>
+            <form id="form-edit" autocomplete="off">
+              <label class="field">
+                <span>Nombre de la dependencia</span>
+                <input type="text" id="f-dependencia" maxlength="500" placeholder="Institución u organismo con quien se firmó">
+              </label>
+              <div class="field-row">
+                <label class="field">
+                  <span>Fecha de firma</span>
+                  <input type="date" id="f-firma" min="1950-01-01" max="2100-12-31">
+                </label>
+                <label class="field">
+                  <span>Fecha de vigencia <span class="badge badge--tiny" id="f-calculada" hidden>calculada</span></span>
+                  <input type="date" id="f-vigencia" min="1950-01-01" max="2100-12-31">
+                </label>
+              </div>
+              <label class="check">
+                <input type="checkbox" id="f-indefinida">
+                <span>Vigencia indefinida</span>
+              </label>
+              <label class="field">
+                <span>Cláusula de vigencia <small class="muted">(texto del convenio)</small></span>
+                <textarea id="f-vigencia-texto" rows="3" maxlength="1500"></textarea>
+              </label>
+              <label class="field">
+                <span>Notas</span>
+                <textarea id="f-notas" rows="3" maxlength="2500" placeholder="Observaciones internas"></textarea>
+              </label>
+              <div class="form-actions">
+                <button type="submit" class="btn btn--primary" id="btn-save">Guardar cambios</button>
+                <span class="muted" id="save-hint"></span>
+              </div>
+              <dl class="meta-list" id="detail-meta"></dl>
+            </form>
+          </section>
+
+          <section class="card tags-card">
+            <div class="card__head">
+              <div>
+                <h2>Etiquetas</h2>
+                <p class="muted">Clasifica el convenio por ámbito, estado, ciudad y tema.</p>
+              </div>
+              <button class="btn btn--text btn--small" id="btn-new-tag-detail">+ Nueva etiqueta</button>
+            </div>
+
+            <div class="tag-block">
+              <h3>Etiquetas actuales</h3>
+              <div class="chips" id="tags-current"></div>
+            </div>
+
+            <div class="suggestions" id="tags-suggestions" hidden>
+              <div class="suggestions__head">
+                <h3>Sugerencias de la IA</h3>
+                <span class="badge badge--amber">Por revisar</span>
+              </div>
+              <div class="chips" id="suggestions-chips"></div>
+              <div class="row-actions">
+                <button class="btn btn--success btn--small" id="btn-accept-suggestions">Aceptar sugerencias</button>
+                <button class="btn btn--outline btn--small" id="btn-discard-suggestions">No usar sugerencias</button>
+              </div>
+            </div>
+
+            <div class="tag-selector" id="tags-selector"></div>
+
+            <div class="tags-actions">
+              <button class="btn btn--primary btn--small" id="btn-save-tags">Guardar etiquetas</button>
+              <button class="btn btn--danger-text btn--small" id="btn-no-tags">Dejar sin etiquetas</button>
+            </div>
+          </section>
+
+          <section class="card transcription-card" id="transcription-card" hidden>
+            <div class="card__head">
+              <div>
+                <h2>Transcripción del documento</h2>
+                <p class="muted">Convierte las páginas escaneadas en texto buscable con el servicio de IA.</p>
+              </div>
+              <span class="badge" id="transcription-badge"></span>
+            </div>
+            <p class="muted" id="transcription-help"></p>
+            <div class="transcription-progress" id="transcription-progress-wrap" hidden>
+              <progress id="transcription-progress" max="100" value="0"></progress>
+              <span id="transcription-progress-text"></span>
+            </div>
+            <div class="row-actions">
+              <button class="btn btn--primary btn--small" id="btn-transcribe">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h8M8 17h5"/></svg>
+                Transcribir páginas escaneadas
+              </button>
+              <button class="btn btn--outline btn--small" id="btn-download-transcription" hidden>Descargar .txt</button>
+              <span class="muted" id="transcription-status"></span>
+            </div>
+            <details class="transcription-detail" id="transcription-detail" hidden>
+              <summary>Ver texto completo</summary>
+              <pre id="transcription-text"></pre>
+            </details>
+          </section>
+
+          <section class="card ai-card" id="ai-card">
+            <div class="card__head">
+              <div>
+                <h2>Análisis con IA</h2>
+                <p class="muted">Extrae dependencia, fechas y etiquetas desde el texto del PDF.</p>
+              </div>
+              <span class="badge" id="ai-badge"></span>
+            </div>
+            <p class="muted" id="ai-help"></p>
+            <div class="row-actions">
+              <button class="btn btn--primary btn--small" id="btn-ai">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.2 4.1L17 9l-3.8 1.9L12 15l-1.2-4.1L7 9l3.8-1.9L12 3Z"/><path d="m18.5 14 .7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3Z"/></svg>
+                Extraer datos con IA
+              </button>
+              <span class="muted" id="ai-status"></span>
+            </div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-tags" hidden>
+        <div class="section-heading">
+          <div>
+            <h1>Etiquetas</h1>
+            <p class="muted">Organiza el catálogo. Las etiquetas de ámbito y estado son base y no se modifican.</p>
+          </div>
+          <span class="badge badge--blue" id="tag-count">0 etiquetas</span>
+        </div>
+
+        <section class="card create-card">
+          <h2>Crear etiqueta</h2>
+          <form id="tag-create-form" class="inline-form">
+            <label class="field">
+              <span>Nombre</span>
+              <input type="text" id="tag-name" maxlength="80" placeholder="Ej. Acapulco, Medicina" required>
+            </label>
+            <label class="field">
+              <span>Tipo</span>
+              <select id="tag-type">
+                <option value="ciudad">Ciudad</option>
+                <option value="tema">Tema / Rubro</option>
+              </select>
+            </label>
+            <div class="field">
+              <span>Color</span>
+              <div class="color-input">
+                <input type="color" id="tag-color" value="#2E7D32" aria-label="Color de la etiqueta">
+                <span class="muted" id="tag-color-value">#2E7D32</span>
+              </div>
+            </div>
+            <button type="submit" class="btn btn--primary">Crear etiqueta</button>
+          </form>
+          <div class="palette" id="tag-palette"></div>
+        </section>
+
+        <div id="tags-groups" class="tags-groups"></div>
+      </section>
+
+      <section class="view" id="view-settings" hidden>
+        <div class="section-heading">
+          <div>
+            <h1>Ajustes</h1>
+            <p class="muted">Configuración local de la aplicación. Nada se envía a un servidor propio.</p>
+          </div>
+        </div>
+
+        <div class="settings-grid">
+          <section class="card">
+            <div class="card__head">
+              <div>
+                <h2>Análisis con IA</h2>
+                <p class="muted">Opcional. Se usa para extraer datos y sugerir etiquetas del texto del PDF.</p>
+              </div>
+              <label class="switch">
+                <input type="checkbox" id="settings-ai-enabled">
+                <span class="switch__track"><span class="switch__thumb"></span></span>
+              </label>
+            </div>
+            <form id="settings-form" class="settings-form">
+              <label class="field">
+                <span>Clave de API</span>
+                <div class="input-with-hint">
+                  <input type="password" id="settings-api-key" placeholder="Pega aquí tu clave" autocomplete="new-password">
+                  <span class="muted" id="settings-key-hint"></span>
+                </div>
+                <small class="muted">Se guarda solo en este equipo. Puedes borrarla cuando quieras.</small>
+              </label>
+              <div class="field-row">
+                <label class="field">
+                  <span>Dirección del servicio</span>
+                  <input type="url" id="settings-base-url" placeholder="https://api.deepseek.com">
+                </label>
+                <label class="field">
+                  <span>Modelo de texto</span>
+                  <input type="text" id="settings-model" placeholder="deepseek-flash">
+                </label>
+              </div>
+              <label class="field">
+                <span>Modelo de visión / transcripción</span>
+                <input type="text" id="settings-vision-model" placeholder="deepseek-flash">
+                <small class="muted">Se usa para leer páginas escaneadas. Si el proveedor tiene un modelo de visión distinto, escríbelo aquí.</small>
+              </label>
+              <div class="form-actions">
+                <button type="submit" class="btn btn--primary">Guardar ajustes de IA</button>
+                <button type="button" class="btn btn--danger-text btn--small" id="btn-clear-key">Borrar clave</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="card">
+            <div class="card__head">
+              <div>
+                <h2>Datos y respaldo</h2>
+                <p class="muted">La base y los PDF viven únicamente en esta computadora.</p>
+              </div>
+            </div>
+            <div class="data-box">
+              <span class="muted">Carpeta de datos</span>
+              <code id="settings-data-dir">—</code>
+            </div>
+            <div class="row-actions">
+              <button class="btn btn--outline" id="btn-open-data">Abrir carpeta</button>
+              <button class="btn btn--outline" id="btn-backup">Crear respaldo ZIP</button>
+            </div>
+            <hr>
+            <h3>Acerca de</h3>
+            <p class="muted">Convenios UAGro es una aplicación local para registrar y consultar convenios. No incluye datos de ejemplo: tu base empieza vacía.</p>
+            <dl class="meta-list">
+              <dt>Versión</dt><dd id="settings-version">1.1.0</dd>
+              <dt>Base de datos</dt><dd>SQLite local</dd>
+              <dt>Hecho con</dt><dd>Go + Wails + WebView2</dd>
+            </dl>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<dialog class="dialog" id="dialog-import">
+  <form method="dialog" class="dialog__body">
+    <div class="dialog__head">
+      <h2>Importar convenios</h2>
+      <button class="dialog__close" value="cancel" aria-label="Cerrar">×</button>
+    </div>
+    <p class="muted">Los archivos se copian a la carpeta local de la aplicación. Después podrás capturar sus datos y etiquetas.</p>
+    <div class="import-list" id="import-list"></div>
+    <div class="banner banner--info" id="import-summary" hidden></div>
+    <div class="dialog__actions">
+      <button class="btn btn--outline" value="cancel" id="btn-import-cancel">Cancelar</button>
+      <button class="btn btn--primary" type="button" id="btn-import-confirm">Importar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="dialog" id="dialog-confirm">
+  <div class="dialog__body">
+    <div class="dialog__head">
+      <h2 id="confirm-title">Confirmar</h2>
+    </div>
+    <p id="confirm-message"></p>
+    <div class="dialog__actions">
+      <button class="btn btn--outline" id="confirm-cancel">Cancelar</button>
+      <button class="btn btn--danger" id="confirm-ok">Confirmar</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="dialog" id="dialog-tag">
+  <form method="dialog" class="dialog__body" id="tag-edit-form">
+    <div class="dialog__head">
+      <h2 id="tag-dialog-title">Editar etiqueta</h2>
+      <button class="dialog__close" value="cancel" aria-label="Cerrar">×</button>
+    </div>
+    <input type="hidden" id="tag-edit-id">
+    <label class="field">
+      <span>Nombre</span>
+      <input type="text" id="tag-edit-name" maxlength="80" required>
+    </label>
+    <label class="field" id="tag-edit-type-wrap">
+      <span>Tipo</span>
+      <select id="tag-edit-type">
+        <option value="ciudad">Ciudad</option>
+        <option value="tema">Tema / Rubro</option>
+      </select>
+    </label>
+    <div class="field">
+      <span>Color</span>
+      <div class="color-input">
+        <input type="color" id="tag-edit-color" value="#2E7D32">
+        <span class="muted" id="tag-edit-color-value">#2E7D32</span>
+      </div>
+    </div>
+    <div class="palette" id="tag-edit-palette"></div>
+    <div class="dialog__actions">
+      <button class="btn btn--outline" value="cancel">Cancelar</button>
+      <button class="btn btn--primary" type="button" id="btn-tag-save">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="loading" id="loading" hidden><span class="spinner"></span><span id="loading-text">Cargando…</span></div>
+
+<script src="vendor/pdf.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,47 @@
+CONVENIOS UAGRO · 1.1.0
+Aplicación de escritorio para gestionar convenios
+
+QUÉ ES
+Convenios UAGro es una aplicación local para registrar, buscar, clasificar y descargar los convenios de la Universidad Autónoma de Guerrero. No necesita servidor, internet ni inicio de sesión.
+
+CÓMO EMPEZAR
+1. Copia esta carpeta completa a la PC.
+2. Haz doble clic en ConveniosUAGro.exe.
+3. Pulsa "Importar PDF" y elige uno o varios documentos.
+4. Completa la dependencia, las fechas y las etiquetas.
+5. Usa "Descargar PDF" en la ficha de cada convenio para guardar una copia.
+
+La aplicación empieza SIN DATOS. No incluye convenios, usuarios ni contraseñas de ejemplo.
+
+REQUISITOS
+- Windows 10 u 11, 64 bits.
+- WebView2. Windows 11 ya lo incluye; si Windows lo pide, permite que lo instale.
+- Para la IA opcional: internet y una clave de API.
+
+DÓNDE SE GUARDA TODO
+%APPDATA%\ConveniosUAGro\
+  convenios.db    Base de datos
+  pdfs\           PDF originales
+  respaldos\      Respaldos
+  settings.json   Configuración y clave de IA
+
+La clave de IA se guarda solo en este equipo. Si no configuras IA, todas las funciones manuales siguen disponibles.
+
+RESPALDO
+En Ajustes → "Crear respaldo ZIP" se genera un archivo con la base y los PDF.
+Para restaurar: cierra la aplicación, descomprime el respaldo y copia convenios.db y la carpeta pdfs\ dentro de %APPDATA%\ConveniosUAGro\, reemplazando lo anterior.
+
+TRANSCRIPCIÓN DE ESCANEADOS
+- En la ficha de un PDF escaneado aparece "Transcribir páginas escaneadas".
+- Se usa el modelo de visión configurado en Ajustes y el texto queda integrado a la búsqueda.
+- La app avisa cuántas páginas enviará y que el proveedor puede cobrar por ellas.
+- Puedes ver y descargar el texto completo como .txt.
+
+NOTAS
+- La extracción de datos (dependencia, fechas y etiquetas) solo funciona con PDF que tengan texto seleccionable.
+- Si cierras la app durante una transcripción, las páginas ya procesadas se conservan y puedes reintentar.
+- El ejecutable no está firmado digitalmente; Windows puede mostrar un aviso de SmartScreen la primera vez. Elige "Más información" → "Ejecutar de todas formas" solo si confías en el archivo.
+- Para llevar la aplicación a otra PC, copia esta carpeta. Los datos no viajan con el ejecutable: cada PC tiene su propia carpeta en %APPDATA%.
+
+SOPORTE
+Revisa README.md (en la carpeta del proyecto) para la documentación técnica, compilación y estructura.

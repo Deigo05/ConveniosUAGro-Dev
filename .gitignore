@@ -1,0 +1,30 @@
+# Construcciones y artefactos
+/build/bin/
+/build/windows/
+*.exe
+*.msi
+*.msix
+*.zip
+*.syso
+
+# Dependencias
+node_modules/
+frontend/node_modules/
+
+# Datos de la aplicaci??n y secretos
+data/
+*.db
+*.db-wal
+*.db-shm
+settings.json
+.env
+config/.env
+usuarios.json
+*.log
+
+# Sistema y editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
