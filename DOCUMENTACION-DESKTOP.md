@@ -1,6 +1,6 @@
 # Convenios UAGro Desktop — Documentación técnica
 
-**Versión:** 1.1.0  
+**Versión:** 1.1.1  
 **Estado:** aplicación Windows compilada, probada y entregada en la PC.  
 **Base inicial:** vacía (se crean solo las etiquetas base al primer arranque).
 
@@ -198,7 +198,7 @@ La clave se guarda en `settings.json`; la UI solo devuelve una pista (`has_api_k
 - `es_escaneado` si hay menos de 200 caracteres visibles.
 - `paginas_sin_texto` cuenta páginas con menos de 30 caracteres; alimenta el estado inicial de transcripción.
 - El visor y la descarga usan el archivo original.
-- La transcripción ocurre en la interfaz: PDF.js detecta páginas sin texto y las renderiza a 1800 px como máximo; Go las envía al modelo de visión.
+- La transcripción ocurre en la interfaz: PDF.js detecta páginas sin texto y las renderiza a 1600 px como máximo; Go las envía al modelo de visión en paralelo (4 páginas) con reintentos de tokens.
 - No hay OCR local; se depende del servicio externo.
 
 ## 9. Compilar
@@ -274,7 +274,7 @@ En el escritorio de Windows:
 C:\Users\PC\Desktop\ConveniosUAGro\
 ├── ConveniosUAGro.exe
 ├── Convenios UAGro-amd64-installer.exe
-├── ConveniosUAGro-1.1.0-win64.zip
+├── ConveniosUAGro-1.1.1-win64.zip
 ├── LEEME.txt
 ├── README.md
 ├── codigo-fuente.zip

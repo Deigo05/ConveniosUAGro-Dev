@@ -1,9 +1,9 @@
 # Construcciones y artefactos
 /build/bin/
 /build/windows/
+frontend/wailsjs/
 *.exe
 *.msi
-*.msix
 *.zip
 *.syso
 
@@ -11,7 +11,7 @@
 node_modules/
 frontend/node_modules/
 
-# Datos de la aplicaci??n y secretos
+# Datos y secretos
 data/
 *.db
 *.db-wal

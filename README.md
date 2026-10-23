@@ -30,6 +30,7 @@ No hay que instalar un servidor ni iniciar sesión. Todo funciona en la PC.
 - Selección múltiple y eliminación en lote.
 - Visor de PDF integrado y **descarga del PDF** con diálogo Guardar como.
 - **Transcripción de páginas escaneadas** con el modelo de visión del servicio externo; el texto se guarda por página y se integra a la búsqueda.
+- Si la IA está activa, la extracción y la transcripción **comienzan automáticamente al confirmar la importación**.
 - Respaldo completo en un archivo ZIP (base de datos + PDF).
 - Análisis opcional con IA para extraer dependencia, fechas y etiquetas desde PDF con texto.
 - Filtro para clasificar los convenios que aún no tienen etiquetas.
@@ -125,6 +126,6 @@ Para restaurar:
 
 ## Estado de la entrega
 
-- Versión: 1.1.0
+- Versión: 1.1.1
 - Base inicial: vacía (solo se crean las etiquetas base Nacional/Internacional y los 32 estados).
 - Sin datos de producción ni credenciales.
