@@ -24,7 +24,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.1.2"
+const appVersion = "1.1.3"
 
 // App es el puente entre la interfaz y la base local.
 type App struct {
@@ -326,6 +326,7 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 		catalogo = append(catalogo, ai.Tag{Nombre: t.Nombre, Tipo: t.Tipo})
 	}
 	client := ai.New(cfg.APIKey, cfg.BaseURL, cfg.Model, cfg.VisionModel)
+	client.WebSearch = cfg.WebSearchEnabled
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 	res, err := client.Extract(ctx, texto, catalogo)
@@ -334,14 +335,19 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 		return store.ConventionDetail{}, err
 	}
 	in := store.ConventionInput{
-		ID:                 id,
-		Dependencia:        res.Dependencia,
-		FechaFirma:         res.FechaFirma,
-		FechaVigencia:      res.FechaVigencia,
-		VigenciaIndefinida: res.VigenciaIndefinida,
-		VigenciaCalculada:  res.VigenciaCalculada,
-		VigenciaTexto:      res.VigenciaTexto,
-		Notas:              res.Notas,
+		ID:                  id,
+		Dependencia:         res.Dependencia,
+		FirmanteDependencia: res.FirmanteDependencia,
+		CargoDependencia:    res.CargoDependencia,
+		FirmanteUAGro:       res.FirmanteUAGro,
+		CargoUAGro:          res.CargoUAGro,
+		Facultad:            res.Facultad,
+		FechaFirma:          res.FechaFirma,
+		FechaVigencia:       res.FechaVigencia,
+		VigenciaIndefinida:  res.VigenciaIndefinida,
+		VigenciaCalculada:   res.VigenciaCalculada,
+		VigenciaTexto:       res.VigenciaTexto,
+		Notas:               res.Notas,
 	}
 	sugs := make([]store.Suggestion, 0, len(res.Sugerencias))
 	for _, s := range res.Sugerencias {
@@ -350,7 +356,50 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 	if err := a.store.SetAIResult(id, in, res.Estado, sugs, ""); err != nil {
 		return store.ConventionDetail{}, err
 	}
+	if strings.TrimSpace(res.Facultad) != "" {
+		_ = a.ensureFacultyTag(id, res.Facultad)
+	}
 	return a.store.Get(id)
+}
+
+// ensureFacultyTag crea, si hace falta, una etiqueta de tema con el nombre de
+// la facultad y la agrega al convenio sin borrar las etiquetas existentes.
+func (a *App) ensureFacultyTag(id int64, facultad string) error {
+	facultad = strings.TrimSpace(facultad)
+	if facultad == "" {
+		return nil
+	}
+	tags, err := a.store.TagsForConvention(id)
+	if err != nil {
+		return err
+	}
+	ids := make([]int64, 0, len(tags)+1)
+	for _, t := range tags {
+		if t.Tipo == "tema" && strings.EqualFold(t.Nombre, facultad) {
+			return nil
+		}
+		ids = append(ids, t.ID)
+	}
+	all, err := a.store.ListTags()
+	if err != nil {
+		return err
+	}
+	var tag store.Tag
+	found := false
+	for _, t := range all {
+		if t.Tipo == "tema" && strings.EqualFold(t.Nombre, facultad) {
+			tag, found = t, true
+			break
+		}
+	}
+	if !found {
+		tag, err = a.store.CreateTag(store.TagInput{Nombre: facultad, Tipo: "tema", Color: "#3A5A9C"})
+		if err != nil {
+			return err
+		}
+	}
+	ids = append(ids, tag.ID)
+	return a.store.ReplaceTags(id, ids, false)
 }
 
 // BeginTranscription prepara la transcripción de las páginas escaneadas.
@@ -373,6 +422,7 @@ func (a *App) TranscribePage(id int64, page int, imageBase64 string) (store.Tran
 		return store.TranscriptionStatus{}, errors.New("configure y active la IA antes de transcribir")
 	}
 	client := ai.New(cfg.APIKey, cfg.BaseURL, cfg.Model, cfg.VisionModel)
+	client.WebSearch = cfg.WebSearchEnabled
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 	texto, err := client.TranscribeImage(ctx, imageBase64, page)

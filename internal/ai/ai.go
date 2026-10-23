@@ -35,15 +35,20 @@ type Suggestion struct {
 
 // Extraction is the validated result ready to save.
 type Extraction struct {
-	Dependencia        string
-	FechaFirma         string
-	FechaVigencia      string
-	VigenciaIndefinida bool
-	VigenciaCalculada  bool
-	VigenciaTexto      string
-	Notas              string
-	Estado             string
-	Sugerencias        []Suggestion
+	Dependencia         string
+	FirmanteDependencia string
+	CargoDependencia    string
+	FirmanteUAGro       string
+	CargoUAGro          string
+	Facultad            string
+	FechaFirma          string
+	FechaVigencia       string
+	VigenciaIndefinida  bool
+	VigenciaCalculada   bool
+	VigenciaTexto       string
+	Notas               string
+	Estado              string
+	Sugerencias         []Suggestion
 }
 
 // Client calls the configured OpenAI-compatible endpoint.
@@ -52,6 +57,7 @@ type Client struct {
 	BaseURL     string
 	Model       string
 	VisionModel string
+	WebSearch   bool
 	HTTP        *http.Client
 }
 
@@ -70,6 +76,7 @@ func New(apiKey, baseURL, model, visionModel string) *Client {
 		BaseURL:     strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		Model:       strings.TrimSpace(model),
 		VisionModel: strings.TrimSpace(visionModel),
+		WebSearch:   true,
 		HTTP:        &http.Client{Timeout: 300 * time.Second},
 	}
 }
@@ -126,6 +133,11 @@ const systemPrompt = `Eres un asistente que extrae datos de convenios firmados p
 Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional ni bloques de código, con exactamente estas claves:
 {
   "dependencia": string|null,
+  "firmante_dependencia": string|null,
+  "cargo_dependencia": string|null,
+  "firmante_uagro": string|null,
+  "cargo_uagro": string|null,
+  "facultad": string|null,
   "fecha_firma": "YYYY-MM-DD"|null,
   "fecha_firma_texto": string|null,
   "vigencia_tipo": "fecha_exacta"|"duracion"|"indefinida"|"no_encontrada",
@@ -139,6 +151,9 @@ Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional ni bloques 
 }
 Reglas:
 - "dependencia": nombre oficial completo de la institución, dependencia u organismo contraparte con quien la UAGro celebra el convenio. NUNCA la propia UAGro ni sus facultades. Si hay varias contrapartes, sepáralas con "; ".
+- "firmante_dependencia" y "cargo_dependencia": nombre completo y cargo de la persona que firma por la dependencia u organismo contraparte. Búscalos al final del documento, junto a firmas y sellos.
+- "firmante_uagro" y "cargo_uagro": nombre completo y cargo de la persona que firma por la UAGro o por la facultad universitaria.
+- "facultad": nombre oficial de la facultad, escuela o unidad académica de la UAGro que celebra el convenio. Si no aparece, usa null.
 - "fecha_firma": fecha de firma. Convierte fechas escritas en palabras o con meses en español a YYYY-MM-DD. "fecha_firma_texto": fragmento literal.
 - Vigencia:
   - Fecha de término concreta: vigencia_tipo="fecha_exacta" y "fecha_vigencia".
@@ -148,7 +163,7 @@ Reglas:
 - "etiquetas": hasta 8 etiquetas relevantes.
   - ambito: 0 o 1, exactamente "Nacional" o "Internacional".
   - estado: 0 o 1, solo un nombre de la lista de estados existentes.
-  - ciudad: 0 a 3. Usa el nombre existente si aparece; si no y hay certeza, propón una nueva con "nueva": true.
+  - ciudad: 0 a 5. Puedes proponer varias ciudades si el convenio abarca varias sedes o municipios. Usa el nombre existente si aparece; si no y hay certeza, propón una nueva con "nueva": true.
   - tema: 0 a 4, solo nombres de temas existentes. No inventes temas.
   - No repitas etiquetas. Si no hay certeza, no la incluyas.
 - No inventes datos. Si falta un dato, usa null y explícalo brevemente en "notas".`
@@ -192,7 +207,14 @@ func (c *Client) Extract(ctx context.Context, texto string, catalogo []Tag) (Ext
 			if err != nil {
 				return out, err
 			}
-			return interpret(raw, catalogo)
+			ext, err := interpret(raw, catalogo)
+			if err != nil {
+				return out, err
+			}
+			if c.WebSearch {
+				c.enrichLocation(ctx, &ext, catalogo)
+			}
+			return ext, nil
 		}
 	}
 	return out, errors.New("la extracción con IA se cortó por longitud incluso con más tokens; intente con un PDF más corto")
@@ -344,7 +366,12 @@ func interpret(raw map[string]interface{}, catalogo []Tag) (Extraction, error) {
 		}
 		return ""
 	}
-	out.Dependencia = get("dependencia")
+	out.Dependencia = truncate(get("dependencia"), 500)
+	out.FirmanteDependencia = truncate(get("firmante_dependencia"), 200)
+	out.CargoDependencia = truncate(get("cargo_dependencia"), 200)
+	out.FirmanteUAGro = truncate(get("firmante_uagro"), 200)
+	out.CargoUAGro = truncate(get("cargo_uagro"), 200)
+	out.Facultad = truncate(get("facultad"), 200)
 	out.VigenciaTexto = truncate(get("vigencia_texto"), 500)
 	notas := []string{}
 	if n := get("notas"); n != "" {
@@ -447,7 +474,7 @@ func validateSuggestions(v interface{}, catalogo []Tag) []Suggestion {
 		nueva := false
 		switch tipo {
 		case "ciudad":
-			if cities >= 3 {
+			if cities >= 5 {
 				continue
 			}
 			cities++

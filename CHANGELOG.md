@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.3] - 2026-10-23
+
+### Agregado
+
+- Campos de firmante y cargo de la dependencia y de la UAGro.
+- Campo de facultad/unidad académica y etiqueta automática de facultad.
+- Búsqueda web opcional (DuckDuckGo) para confirmar ubicación cuando faltan estado o ciudad.
+- Soporte explícito para varias etiquetas de ciudad.
+
+### Corregido
+
+- La extracción automática ahora se ejecuta también al terminar una transcripción manual.
+- Los campos de firmantes y facultad se guardan con la extracción IA.
+- Límite de ciudades ampliado de 3 a 5 en las sugerencias de IA.
+
 ## [1.1.2] - 2026-10-23
 
 ### Cambiado

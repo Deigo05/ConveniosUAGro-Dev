@@ -17,7 +17,7 @@ import (
 //go:embed schema.sql
 var schemaFS embed.FS
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 // Paths agrupa las rutas de datos de la aplicación.
 type Paths struct {
@@ -104,14 +104,21 @@ func Open(paths Paths) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("la base de datos es más reciente que esta aplicación (versión %d)", version)
 	}
-	switch version {
-	case 0:
+	switch {
+	case version == 0:
 		if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
 			db.Close()
 			return nil, err
 		}
-	case 1:
+	case version == 1:
 		if err := migrateV2(db); err != nil {
+			db.Close()
+			return nil, err
+		}
+		version = 2
+	}
+	if version == 2 {
+		if err := migrateV3(db); err != nil {
 			db.Close()
 			return nil, err
 		}
@@ -165,6 +172,30 @@ func migrateV2(db *sql.DB) error {
 		return err
 	}
 	if _, err := tx.Exec("PRAGMA user_version=2"); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// migrateV3 agrega firmantes, facultad y datos de calidad del expediente.
+func migrateV3(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		"ALTER TABLE convenios ADD COLUMN firmante_dependencia TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE convenios ADD COLUMN cargo_dependencia TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE convenios ADD COLUMN firmante_uagro TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE convenios ADD COLUMN cargo_uagro TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE convenios ADD COLUMN facultad TEXT NOT NULL DEFAULT ''",
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("PRAGMA user_version=3"); err != nil {
 		return err
 	}
 	return tx.Commit()

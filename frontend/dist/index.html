@@ -39,7 +39,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8.3 8 9 4.6-.7 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
         <div><strong>Datos locales</strong><span>Todo se guarda en tu PC</span></div>
       </div>
-      <span class="version">Versión 1.1.2</span>
+      <span class="version">Versión 1.1.3</span>
     </div>
   </aside>
 
@@ -198,6 +198,30 @@
               <label class="field">
                 <span>Nombre de la dependencia</span>
                 <input type="text" id="f-dependencia" maxlength="500" placeholder="Institución u organismo con quien se firmó">
+              </label>
+              <div class="field-row">
+                <label class="field">
+                  <span>Firmante de la dependencia</span>
+                  <input type="text" id="f-firmante-dependencia" maxlength="200" placeholder="Nombre completo">
+                </label>
+                <label class="field">
+                  <span>Cargo en la dependencia</span>
+                  <input type="text" id="f-cargo-dependencia" maxlength="200" placeholder="Cargo">
+                </label>
+              </div>
+              <div class="field-row">
+                <label class="field">
+                  <span>Firmante de la UAGro</span>
+                  <input type="text" id="f-firmante-uagro" maxlength="200" placeholder="Nombre completo">
+                </label>
+                <label class="field">
+                  <span>Cargo en la UAGro</span>
+                  <input type="text" id="f-cargo-uagro" maxlength="200" placeholder="Cargo">
+                </label>
+              </div>
+              <label class="field">
+                <span>Facultad o unidad académica</span>
+                <input type="text" id="f-facultad" maxlength="200" placeholder="Ej. Facultad de Turismo">
               </label>
               <div class="field-row">
                 <label class="field">
@@ -392,6 +416,11 @@
                 <input type="text" id="settings-vision-model" placeholder="deepseek-flash">
                 <small class="muted">Se usa para leer páginas escaneadas. Si el proveedor tiene un modelo de visión distinto, escríbelo aquí.</small>
               </label>
+              <label class="check">
+                <input type="checkbox" id="settings-web-search">
+                <span>Permitir búsqueda web para confirmar la ubicación</span>
+              </label>
+              <small class="muted">Solo se busca el nombre de la contraparte/facultad cuando faltan ciudad o estado.</small>
               <div class="form-actions">
                 <button type="submit" class="btn btn--primary">Guardar ajustes de IA</button>
                 <button type="button" class="btn btn--danger-text btn--small" id="btn-clear-key">Borrar clave</button>
@@ -418,7 +447,7 @@
             <h3>Acerca de</h3>
             <p class="muted">Convenios UAGro es una aplicación local para registrar y consultar convenios. No incluye datos de ejemplo: tu base empieza vacía.</p>
             <dl class="meta-list">
-              <dt>Versión</dt><dd id="settings-version">1.1.2</dd>
+              <dt>Versión</dt><dd id="settings-version">1.1.3</dd>
               <dt>Base de datos</dt><dd>SQLite local</dd>
               <dt>Hecho con</dt><dd>Go + Wails + WebView2</dd>
             </dl>

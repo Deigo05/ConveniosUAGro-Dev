@@ -17,39 +17,43 @@ const (
 
 // Config es lo que se persiste en settings.json.
 type Config struct {
-	AIEnabled   bool   `json:"ai_enabled"`
-	APIKey      string `json:"api_key"`
-	BaseURL     string `json:"base_url"`
-	Model       string `json:"model"`
-	VisionModel string `json:"vision_model"`
+	AIEnabled        bool   `json:"ai_enabled"`
+	WebSearchEnabled bool   `json:"web_search_enabled"`
+	APIKey           string `json:"api_key"`
+	BaseURL          string `json:"base_url"`
+	Model            string `json:"model"`
+	VisionModel      string `json:"vision_model"`
 }
 
 // View es la representación segura para la interfaz: nunca expone la clave completa.
 type View struct {
-	AIEnabled   bool   `json:"ai_enabled"`
-	HasAPIKey   bool   `json:"has_api_key"`
-	APIKeyHint  string `json:"api_key_hint"`
-	BaseURL     string `json:"base_url"`
-	Model       string `json:"model"`
-	VisionModel string `json:"vision_model"`
+	AIEnabled        bool   `json:"ai_enabled"`
+	WebSearchEnabled bool   `json:"web_search_enabled"`
+	HasAPIKey        bool   `json:"has_api_key"`
+	APIKeyHint       string `json:"api_key_hint"`
+	BaseURL          string `json:"base_url"`
+	Model            string `json:"model"`
+	VisionModel      string `json:"vision_model"`
 }
 
 // SaveInput contiene solo los campos que el usuario puede cambiar.
 type SaveInput struct {
-	AIEnabled   *bool  `json:"ai_enabled"`
-	APIKey      string `json:"api_key"`
-	ClearAPIKey bool   `json:"clear_api_key"`
-	BaseURL     string `json:"base_url"`
-	Model       string `json:"model"`
-	VisionModel string `json:"vision_model"`
+	AIEnabled        *bool  `json:"ai_enabled"`
+	WebSearchEnabled *bool  `json:"web_search_enabled"`
+	APIKey           string `json:"api_key"`
+	ClearAPIKey      bool   `json:"clear_api_key"`
+	BaseURL          string `json:"base_url"`
+	Model            string `json:"model"`
+	VisionModel      string `json:"vision_model"`
 }
 
 func defaults() Config {
 	return Config{
-		AIEnabled:   false,
-		BaseURL:     DefaultBaseURL,
-		Model:       DefaultModel,
-		VisionModel: DefaultModel,
+		AIEnabled:        false,
+		WebSearchEnabled: true,
+		BaseURL:          DefaultBaseURL,
+		Model:            DefaultModel,
+		VisionModel:      DefaultModel,
 	}
 }
 
@@ -74,6 +78,9 @@ func Load(path string) (Config, error) {
 	}
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return defaults(), err
+	}
+	if !strings.Contains(string(data), `"web_search_enabled"`) {
+		cfg.WebSearchEnabled = true
 	}
 	cfg.BaseURL = strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
 	if cfg.BaseURL == "" {
@@ -134,6 +141,9 @@ func (c *Config) Apply(in SaveInput) error {
 	if in.AIEnabled != nil {
 		c.AIEnabled = *in.AIEnabled
 	}
+	if in.WebSearchEnabled != nil {
+		c.WebSearchEnabled = *in.WebSearchEnabled
+	}
 	if in.ClearAPIKey {
 		c.APIKey = ""
 	} else if strings.TrimSpace(in.APIKey) != "" {
@@ -177,11 +187,12 @@ func (c Config) ToView() View {
 		}
 	}
 	return View{
-		AIEnabled:   c.AIEnabled,
-		HasAPIKey:   c.APIKey != "",
-		APIKeyHint:  hint,
-		BaseURL:     c.BaseURL,
-		Model:       c.Model,
-		VisionModel: c.VisionModel,
+		AIEnabled:        c.AIEnabled,
+		WebSearchEnabled: c.WebSearchEnabled,
+		HasAPIKey:        c.APIKey != "",
+		APIKeyHint:       hint,
+		BaseURL:          c.BaseURL,
+		Model:            c.Model,
+		VisionModel:      c.VisionModel,
 	}
 }

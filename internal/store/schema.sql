@@ -3,6 +3,11 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS convenios (
   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
   dependencia             TEXT NOT NULL DEFAULT '',
+  firmante_dependencia    TEXT NOT NULL DEFAULT '',
+  cargo_dependencia       TEXT NOT NULL DEFAULT '',
+  firmante_uagro          TEXT NOT NULL DEFAULT '',
+  cargo_uagro             TEXT NOT NULL DEFAULT '',
+  facultad                TEXT NOT NULL DEFAULT '',
   fecha_firma             TEXT,
   fecha_vigencia          TEXT,
   vigencia_indefinida     INTEGER NOT NULL DEFAULT 0,
