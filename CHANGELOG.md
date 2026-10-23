@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.6] - 2026-10-23
+
+### Cambiado
+
+- Al importar uno o varios PDF, la app permanece en la pantalla principal de convenios; ya no abre automáticamente la ficha ni la pantalla de transcripción.
+- Las etiquetas sugeridas por la IA se aplican automáticamente, sin aprobación del usuario.
+- La pantalla principal muestra un aviso de procesamiento y el estado por convenio (en cola, transcribiendo, analizando).
+- La lista se actualiza automáticamente mientras hay transcripciones o análisis en curso.
+- La ficha sigue disponible al pulsar un convenio o el botón Abrir.
+
+### Corregido
+
+- Se aplican automáticamente sugerencias pendientes de versiones anteriores.
+
 ## [1.1.5] - 2026-10-23
 
 ### Corregido

@@ -275,7 +275,7 @@ En el escritorio de Windows:
 C:\Users\PC\Desktop\ConveniosUAGro\
 ├── ConveniosUAGro.exe
 ├── Convenios UAGro-amd64-installer.exe
-├── ConveniosUAGro-1.1.5-win64.zip
+├── ConveniosUAGro-1.1.6-win64.zip
 ├── LEEME.txt
 ├── README.md
 ├── codigo-fuente.zip

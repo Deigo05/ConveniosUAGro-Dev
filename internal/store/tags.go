@@ -372,6 +372,12 @@ func (s *Store) AcceptSuggestions(convenioID int64) error {
 	return s.ReplaceTags(convenioID, ids, true)
 }
 
+// MarkTagsReviewed marca la clasificación como revisada sin cambiar etiquetas.
+func (s *Store) MarkTagsReviewed(convenioID int64) error {
+	_, err := s.db.Exec("UPDATE convenios SET etiquetas_revisadas=1, etiquetas_sugeridas='', actualizado_en=datetime('now') WHERE id=?", convenioID)
+	return err
+}
+
 // DiscardSuggestions marca la clasificación como revisada. Si remove, quita
 // también las etiquetas actuales (equivale a «dejar sin etiquetas»).
 func (s *Store) DiscardSuggestions(convenioID int64, remove bool) error {

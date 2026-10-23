@@ -31,7 +31,9 @@ const state = {
   confirmResolve: null,
   searchTimer: null,
   tagTimer: null,
-  loadingCount: 0
+  loadingCount: 0,
+  listLoading: false,
+  pollTimer: null
 };
 
 document.addEventListener('DOMContentLoaded', init);
@@ -200,6 +202,8 @@ function renderStats() {
 }
 
 async function loadList() {
+  if (state.listLoading) return;
+  state.listLoading = true;
   const area = $('#list-area');
   area.setAttribute('aria-busy', 'true');
   try {
@@ -209,6 +213,8 @@ async function loadList() {
     renderList();
     renderSummary();
     renderPagination();
+    renderProcessingBanner();
+    syncProcessingPoll();
     updateSearchClear();
     updateClearFilters();
     updateBulkBar();
@@ -216,8 +222,48 @@ async function loadList() {
     area.innerHTML = errorPanel(errorText(err));
     showToast(errorText(err), 'error');
   } finally {
+    state.listLoading = false;
     area.removeAttribute('aria-busy');
   }
+}
+
+function isProcessing(c) {
+  return c.transcripcion_estado === 'en_proceso' ||
+    c.ia_estado === 'pendiente' ||
+    (c.transcripcion_estado === 'pendiente' && Number(c.paginas_por_transcribir || 0) > 0);
+}
+
+function processingItems() {
+  return (state.result.items || []).filter(isProcessing);
+}
+
+function renderProcessingBanner() {
+  const banner = $('#processing-banner');
+  if (!banner) return;
+  const items = processingItems();
+  const active = items.length > 0 || state.autoRunning;
+  banner.hidden = !active;
+  if (!active) return;
+  const transcripcion = items.filter(c => c.transcripcion_estado === 'en_proceso').length;
+  const analisis = items.filter(c => c.ia_estado === 'pendiente').length;
+  const enCola = items.filter(c => c.transcripcion_estado === 'pendiente' && Number(c.paginas_por_transcribir || 0) > 0).length;
+  const partes = [];
+  if (transcripcion) partes.push(`${transcripcion} en transcripción`);
+  if (analisis) partes.push(`${analisis} en análisis`);
+  if (enCola) partes.push(`${enCola} en cola`);
+  if (!partes.length) partes.push('preparando el procesamiento');
+  const n = Math.max(items.length, state.autoQueue.length + (state.autoRunning ? 1 : 0), 1);
+  $('#processing-text').textContent = `Procesando ${n} convenio${n === 1 ? '' : 's'} con IA (${partes.join(' y ')}). Puedes seguir usando el buscador; los datos se actualizarán solos.`;
+}
+
+function syncProcessingPoll() {
+  clearTimeout(state.pollTimer);
+  state.pollTimer = null;
+  if (state.view !== 'convenios') return;
+  if (!state.autoRunning && processingItems().length === 0) return;
+  state.pollTimer = setTimeout(() => {
+    if (state.view === 'convenios') loadList();
+  }, 3000);
 }
 
 function scheduleLoad(ms = 240) {
@@ -368,13 +414,16 @@ function sortMark(field) {
 function rowHTML(c) {
   const tags = (c.etiquetas || []).map(tag => chipHTML(tag)).join('');
   const badges = [];
-  if (state.config.ai_enabled && c.ia_estado === 'pendiente') badges.push('<span class="badge">Analizando…</span>');
-  if (state.config.ai_enabled && (c.ia_estado === 'error' || c.ia_estado === 'omitido') && !c.etiquetas_revisadas) {
-    // "omitido" es lo normal en captura manual; no lo mostramos como error.
+  if (state.config.ai_enabled && c.ia_estado === 'pendiente') {
+    badges.push('<span class="badge badge--blue">Analizando…</span>');
+  } else if (state.config.ai_enabled && c.ia_estado === 'error') {
+    badges.push('<span class="badge badge--red" title="' + esc(c.ia_error || '') + '">IA con error</span>');
   }
-  if (!c.etiquetas_revisadas) badges.push('<span class="badge badge--amber">Etiquetas pendientes</span>');
+  if (!c.etiquetas_revisadas && !isProcessing(c) && !state.autoRunning) badges.push('<span class="badge badge--amber">Etiquetas pendientes</span>');
   if (c.transcripcion_estado === 'en_proceso') {
-    badges.push('<span class="badge badge--blue">Transcribiendo…</span>');
+    const total = Number(c.paginas_transcritas || 0) + Number(c.paginas_por_transcribir || 0);
+    const done = Number(c.paginas_transcritas || 0);
+    badges.push(`<span class="badge badge--blue">Transcribiendo${total ? ` ${done}/${total}` : ''}…</span>`);
   } else if (c.transcripcion_estado === 'completa') {
     badges.push('<span class="badge badge--green">Texto transcrito</span>');
   } else if (c.transcripcion_estado === 'error') {
@@ -867,12 +916,16 @@ function startAutoAI(ids) {
   if (!ids || !ids.length || !state.config.ai_enabled || !state.config.has_api_key) return;
   state.autoQueue.push(...ids.filter(Boolean));
   if (!state.autoRunning) runAutoAIQueue();
+  renderProcessingBanner();
+  syncProcessingPoll();
 }
 
 async function runAutoAIQueue() {
   state.autoRunning = true;
   state.autoTotal = state.autoQueue.length;
   state.autoDone = 0;
+  renderProcessingBanner();
+  syncProcessingPoll();
   try {
     while (state.autoQueue.length) {
       const id = state.autoQueue.shift();
@@ -890,6 +943,8 @@ async function runAutoAIQueue() {
     setAIActivity('');
     await refreshData();
     await loadList();
+    renderProcessingBanner();
+    syncProcessingPoll();
   }
 }
 
@@ -1137,15 +1192,18 @@ async function confirmImport() {
     $('#btn-import-cancel').textContent = 'Cerrar';
     await refreshData();
     await loadList();
-    if (ok > 0) showToast(`${ok} PDF importado${ok === 1 ? '' : 's'}. Completa los datos.`, 'success');
+    if (ok > 0) showToast(`${ok} PDF importado${ok === 1 ? '' : 's'}.`, 'success');
     if (errors.length) showToast(`${errors.length} archivo${errors.length === 1 ? '' : 's'} no se pudo importar.`, 'error');
     if (ok > 0 && state.config.ai_enabled && state.config.has_api_key) {
       showToast('La IA procesará automáticamente los archivos importados.', 'info');
       startAutoAI(results.filter(r => !r.error).map(r => r.id));
     }
-    if (results.length === 1 && !errors.length) {
+    if (ok > 0 && !errors.length) {
       $('#dialog-import').close();
-      await openDetail(results[0].id);
+      showView('convenios');
+      await loadList();
+      renderProcessingBanner();
+      syncProcessingPoll();
     }
   } catch (err) {
     $('#import-summary').className = 'banner banner--error';
@@ -1173,6 +1231,13 @@ function showView(view) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
   if (view === 'etiquetas') renderTagsView();
   if (view === 'ajustes') renderSettings();
+  if (view === 'convenios') {
+    renderProcessingBanner();
+    syncProcessingPoll();
+  } else {
+    clearTimeout(state.pollTimer);
+    state.pollTimer = null;
+  }
 }
 
 function renderTagsView() {

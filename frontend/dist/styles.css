@@ -242,6 +242,7 @@ textarea { resize: vertical; min-height: 70px; }
 .banner--info { background: #edf3fc; border-color: var(--azul-medio); color: #29456f; }
 .banner--warn { background: var(--ambar-claro); border-color: #e09b2d; color: #6f4800; }
 .banner--error { background: var(--rojo-claro); border-color: var(--rojo); color: #7a1a12; }
+#processing-banner { display: flex; align-items: center; gap: 10px; }
 .detail-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(390px, .92fr); gap: 14px; align-items: start; }
 .card { background: #fff; border: 1px solid var(--borde); border-radius: var(--radio); box-shadow: var(--sombra-suave); padding: 17px; min-width: 0; }
 .card__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
