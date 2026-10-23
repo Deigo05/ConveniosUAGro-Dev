@@ -28,3 +28,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+
+# Bindings generados por Wails
+frontend/wailsjs/
