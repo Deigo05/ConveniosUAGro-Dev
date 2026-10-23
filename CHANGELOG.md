@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.2] - 2026-10-23
+
+### Cambiado
+
+- Extracción de datos con `reasoning_effort=high` y hasta 32,000 tokens para mejorar la calidad.
+- Estado "Analizando" visible en el listado mientras corre la extracción automática.
+- Aviso explícito de "transcripción completa, extrayendo datos" en el procesamiento automático.
+- Límite de espera del cliente ampliado a 300 segundos para páginas complejas.
+
 ## [1.1.1] - 2026-10-23
 
 ### Agregado

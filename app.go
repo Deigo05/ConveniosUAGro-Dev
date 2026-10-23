@@ -24,7 +24,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.1.1"
+const appVersion = "1.1.2"
 
 // App es el puente entre la interfaz y la base local.
 type App struct {
@@ -316,6 +316,7 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 		_ = a.store.SetIAStatus(id, "error", err.Error())
 		return store.ConventionDetail{}, err
 	}
+	_ = a.store.SetIAStatus(id, "pendiente", "")
 	tags, err := a.store.ExistingTags()
 	if err != nil {
 		return store.ConventionDetail{}, err
@@ -325,7 +326,7 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 		catalogo = append(catalogo, ai.Tag{Nombre: t.Nombre, Tipo: t.Tipo})
 	}
 	client := ai.New(cfg.APIKey, cfg.BaseURL, cfg.Model, cfg.VisionModel)
-	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 	res, err := client.Extract(ctx, texto, catalogo)
 	if err != nil {
@@ -372,7 +373,7 @@ func (a *App) TranscribePage(id int64, page int, imageBase64 string) (store.Tran
 		return store.TranscriptionStatus{}, errors.New("configure y active la IA antes de transcribir")
 	}
 	client := ai.New(cfg.APIKey, cfg.BaseURL, cfg.Model, cfg.VisionModel)
-	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 	texto, err := client.TranscribeImage(ctx, imageBase64, page)
 	if err != nil {

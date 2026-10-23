@@ -70,7 +70,7 @@ func New(apiKey, baseURL, model, visionModel string) *Client {
 		BaseURL:     strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		Model:       strings.TrimSpace(model),
 		VisionModel: strings.TrimSpace(visionModel),
-		HTTP:        &http.Client{Timeout: 180 * time.Second},
+		HTTP:        &http.Client{Timeout: 300 * time.Second},
 	}
 }
 
@@ -169,10 +169,11 @@ func (c *Client) Extract(ctx context.Context, texto string, catalogo []Tag) (Ext
 	}
 	prompt := catalogText(catalogo) + "\n\nTexto del convenio:\n<<<\n" + texto + "\n>>>"
 	body := map[string]interface{}{
-		"model":           c.Model,
-		"temperature":     0.1,
-		"max_tokens":      4000,
-		"response_format": map[string]string{"type": "json_object"},
+		"model":            c.Model,
+		"temperature":      0.1,
+		"max_tokens":       16000,
+		"reasoning_effort": "high",
+		"response_format":  map[string]string{"type": "json_object"},
 		"messages": []map[string]string{
 			{"role": "system", "content": systemPrompt},
 			{"role": "user", "content": prompt},
@@ -180,7 +181,7 @@ func (c *Client) Extract(ctx context.Context, texto string, catalogo []Tag) (Ext
 	}
 	var content, finish string
 	var err error
-	for _, limit := range []int{8000, 16000} {
+	for _, limit := range []int{16000, 32000} {
 		body["max_tokens"] = limit
 		content, finish, err = c.chat(ctx, body)
 		if err != nil {
