@@ -263,3 +263,41 @@ func TestPorVencerFilter(t *testing.T) {
 		t.Fatalf("por vencer: total=%d err=%v", res.Total, err)
 	}
 }
+
+// Las correcciones confirmadas con la imagen se aplican aunque las variantes
+// no se parezcan, pero solo en su página y nunca a un párrafo entero.
+func TestApplyPageCorrections(t *testing.T) {
+	st, paths := testStore(t)
+	id := insertWithPDF(t, st, paths, strings.Repeat("d", 32)+".pdf", "sha-d", "")
+	if err := st.BeginTranscription(id, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SaveTranscriptionPage(id, 1, "Representada por la Dra. Joaquín Zorro Falcón en el proemio."); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SaveTranscriptionPage(id, 2, "a los 4 días del mes de noviembre\n[Firma]\nDR. JOAQUÍN ZORRO[?] FALCÓN"); err != nil {
+		t.Fatal(err)
+	}
+	applied, err := st.ApplyPageCorrections(id, 2, []NameCorrection{
+		{Original: "Joaquín Zorro Falcón", Correcto: "Jacqueline Cerón Falcón"},
+		{Original: "4 días del mes de noviembre", Correcto: "4 días del mes de septiembre"},
+		{Original: "texto que no está en la página", Correcto: "otro"},
+		{Original: "a los 4 días del mes de noviembre de un año que no cabe en doce palabras", Correcto: "x"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(applied) != 2 {
+		t.Fatalf("correcciones aplicadas = %+v", applied)
+	}
+	p2, _ := st.TranscriptionPage(id, 2)
+	if !strings.Contains(p2, "JACQUELINE CERÓN FALCÓN") || !strings.Contains(p2, "mes de septiembre") {
+		t.Fatalf("página 2 = %q", p2)
+	}
+	if p1, _ := st.TranscriptionPage(id, 1); !strings.Contains(p1, "Joaquín Zorro Falcón") {
+		t.Fatalf("no debía tocar otra página: %q", p1)
+	}
+	if tr, _ := st.GetTranscription(id); !strings.Contains(tr.Texto, "septiembre") {
+		t.Fatalf("el texto completo no se reconstruyó: %q", tr.Texto)
+	}
+}

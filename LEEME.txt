@@ -70,6 +70,7 @@ DATOS EXTRAÍDOS
 - Si un convenio renueva a otro, el anterior pasa a su "Historial de versiones" y en la lista solo se ve el más reciente. La IA los une sola cuando el documento dice que renueva al anterior; si solo coinciden contraparte, tipo y facultad, se propone como "¿Renovación?" para que lo confirmes. Para ver las versiones anteriores en la lista, marca "Incluir versiones anteriores".
 - Selecciona varios convenios y pulsa "Descargar PDF" para guardarlos juntos en una carpeta con esos nombres.
 - Si la transcripción leyó un nombre de dos formas (por ejemplo "García" y "Garay"), se unifica con la forma correcta.
+- Si un dato importante aparece de dos formas en un escaneado (un firmante con dos nombres, dos fechas de firma), la app vuelve a mirar esas páginas con más resolución, corrige la transcripción si la imagen lo confirma y vuelve a extraer los datos. La ficha dice qué se verificó. Tarda unos segundos más, solo en esos documentos.
 
 TRANSCRIPCIÓN DE ESCANEADOS
 - En la ficha de un PDF escaneado aparece "Transcribir páginas escaneadas".

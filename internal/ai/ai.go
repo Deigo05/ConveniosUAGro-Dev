@@ -73,8 +73,20 @@ type Extraction struct {
 	// oficio, una constancia…); el motivo va en Notas.
 	EsConvenio bool
 	// Domicilio es el de la contraparte tal como aparece; ayuda a buscar su
-	// ciudad en la web.
-	Domicilio string
+	// ciudad en la web, igual que LugarFirma cuando no consta el domicilio.
+	Domicilio  string
+	LugarFirma string
+	// Dudas son contradicciones de lectura en páginas transcritas que el texto
+	// no basta para resolver; se revisan después con la imagen de la página.
+	Dudas []Doubt
+}
+
+// Doubt es un dato que la transcripción leyó de formas distintas (un nombre
+// en el proemio y otro bajo la firma, dos fechas de firma).
+type Doubt struct {
+	Paginas  []int    `json:"paginas"`
+	Dato     string   `json:"dato"`
+	Lecturas []string `json:"lecturas"`
 }
 
 // Correction es un nombre que el modelo considera mal leído en una página
@@ -132,7 +144,10 @@ type Client struct {
 	WebSearch   bool
 	// Effort es el nivel de razonamiento de la extracción (low, medium, high).
 	Effort string
-	HTTP   *http.Client
+	// ReferenceDate (AAAA-MM-DD) es la fecha en que se registró el documento:
+	// una fecha de firma posterior es un error de lectura.
+	ReferenceDate string
+	HTTP          *http.Client
 }
 
 func New(apiKey, baseURL, model, visionModel string) *Client {
@@ -266,24 +281,27 @@ func (c *Client) post(ctx context.Context, payload []byte) ([]byte, int, error) 
 // systemPrompt es breve a propósito: cada regla evita un error observado en
 // convenios reales (fechas de nombramiento, testigos, facultad inventada…).
 var systemPrompt = `Extraes datos de convenios de la Universidad Autónoma de Guerrero (UAGro), México. Responde solo con un objeto JSON con estas claves:
-{"es_convenio":b,"tipo_documento":"Convenio General"|"Convenio Específico"|"Convenio Marco"|"Convenio de Colaboración"|"Convenio Modificatorio"|"Carta de Intención"|"Contrato"|"Acuerdo"|"Otro"|null,"dependencia":s|null,"dependencia_corta":s|null,"domicilio":s|null,"firmante_dependencia":s|null,"cargo_dependencia":s|null,"firmante_uagro":s|null,"cargo_uagro":s|null,"facultad":s|null,"facultad_ciudad":s|null,"fecha_firma":"AAAA-MM-DD"|null,"fecha_firma_texto":s|null,"vigencia_tipo":"fecha_exacta"|"duracion"|"indefinida"|"no_encontrada","fecha_vigencia":"AAAA-MM-DD"|null,"vigencia_duracion":{"anios":n,"meses":n,"dias":n}|null,"vigencia_inicio":"firma"|"AAAA-MM-DD"|null,"vigencia_texto":s|null,"etiquetas":[{"tipo":"ambito"|"estado"|"ciudad"|"tema","nombre":s}],"correcciones":[{"original":s,"correcto":s}],"renovacion":{"es":b,"fecha_anterior":"AAAA-MM-DD"|null},"notas":s|null}
+{"es_convenio":b,"tipo_documento":"Convenio General"|"Convenio Específico"|"Convenio Marco"|"Convenio de Colaboración"|"Convenio Modificatorio"|"Carta de Intención"|"Contrato"|"Acuerdo"|"Otro"|null,"dependencia":s|null,"dependencia_corta":s|null,"domicilio":s|null,"firmante_dependencia":s|null,"cargo_dependencia":s|null,"firmante_uagro":s|null,"cargo_uagro":s|null,"facultad":s|null,"facultad_ciudad":s|null,"fecha_firma":"AAAA-MM-DD"|null,"fecha_firma_texto":s|null,"lugar_firma":s|null,"vigencia_tipo":"fecha_exacta"|"duracion"|"indefinida"|"no_encontrada","fecha_vigencia":"AAAA-MM-DD"|null,"vigencia_duracion":{"anios":n,"meses":n,"dias":n}|null,"vigencia_inicio":"firma"|"AAAA-MM-DD"|null,"vigencia_texto":s|null,"etiquetas":[{"tipo":"ambito"|"estado"|"ciudad"|"tema","nombre":s}],"correcciones":[{"original":s,"correcto":s}],"dudas":[{"paginas":[n],"dato":s,"lecturas":[s]}],"renovacion":{"es":b,"fecha_anterior":"AAAA-MM-DD"|null},"notas":s|null}
 Reglas:
 0. "es_convenio": false si el archivo no es un convenio, acuerdo, contrato o carta de intención entre la UAGro y otra parte (por ejemplo: acta constitutiva, poder notarial, oficio, constancia, certificado, identificación, factura); di qué es en "notas" y llena solo lo que conste.
 1. Partes: búscalas en el proemio ("CONVENIO ... QUE CELEBRAN ...") y en las declaraciones. "dependencia" es la contraparte con su nombre oficial completo; nunca la UAGro ni sus facultades. Varias contrapartes: sepáralas con "; ". "dependencia_corta": sus siglas oficiales si aparecen en el texto ("IMSS", "SEG") o un nombre corto de máximo 40 caracteres ("Ayuntamiento de Acapulco"). "tipo_documento": según el título del documento; "Convenio Modificatorio" incluye addenda. "domicilio": el de la contraparte tal como aparece (máximo 150 caracteres).
-2. Firmantes: nombre y cargo del bloque de firmas final; si no se lee, de las declaraciones. Nombre sin grados ni tratamientos (Dr., Mtra., Lic., C.). Testigos, testigos de honor y notarios no son firmantes.
+2. Firmantes: nombre y cargo de quien firma por cada parte, sin grados ni tratamientos (Dr., Mtra., Lic., C.). Tómalos del bloque de firmas final y compáralos con quien representa a esa parte en el proemio y las declaraciones; si no se leen, usa las declaraciones. Testigos, testigos de honor y notarios no son firmantes.
 3. "facultad": solo si el texto dice expresamente que una facultad, escuela o unidad académica de la UAGro celebra, suscribe o participa (o firma su director). Si firma la Rectoría o la universidad en general sin nombrar una unidad académica, usa null. Escribe el nombre oficial del catálogo, sin ciudad: los nombres anteriores o abreviados son la misma unidad ("Unidad Académica de Turismo", "UAGro-FT" → "Facultad de Turismo"; "EMVZ No. 3" → "Escuela Superior de Medicina Veterinaria y Zootecnia 03"). Si no está en el catálogo, cópiala tal como aparece. "facultad_ciudad": sede de la facultad según el catálogo o el domicilio de la UAGro en el documento, nunca la ciudad de la contraparte; null si no consta. Catálogo (nombre y sedes): ` + uagro.CatalogText() + `.
-4. "fecha_firma": la del cierre ("firmado en ... a los X días del mes de ... de ..."); nunca fechas de nombramientos, decretos, actas o publicaciones. "fecha_firma_texto": ese fragmento literal. "renovacion.es": true solo si el documento dice que renueva, sustituye o da continuidad a un convenio anterior con la misma contraparte (no basta con citarlo en antecedentes); "fecha_anterior": la firma de ese convenio anterior si consta.
+4. "fecha_firma": la del cierre ("firmado en ... a los X días del mes de ... de ..."); nunca fechas de nombramientos, decretos, actas o publicaciones, ni una fecha posterior al registro del documento. Lo marcado [Tachado: ...] no vale. Si el cierre y una anotación de firmas ("las firmas que anteceden corresponden al acuerdo ... en fecha ...") no coinciden, usa la de la anotación (suele ser la que se actualizó al firmar, y el cierre puede estar tachado) y dilo en "notas". "fecha_firma_texto": ese fragmento literal. "lugar_firma": ciudad y estado donde se firma, tal como aparecen. "renovacion.es": true solo si el documento dice que renueva, sustituye o da continuidad a un convenio anterior con la misma contraparte (no basta con citarlo en antecedentes); "fecha_anterior": la firma de ese convenio anterior si consta.
 5. Vigencia: fecha de término explícita → "fecha_exacta". Plazo ("tres años") → "duracion" con "vigencia_duracion" y "vigencia_inicio" ("firma" si cuenta desde la firma, o la fecha de inicio indicada); "fecha_vigencia" queda null porque el sistema la calcula. Tiempo indefinido o indeterminado → "indefinida". "vigencia_texto": cita literal de la cláusula, máximo 300 caracteres.
 6. "etiquetas" con nombres exactos del catálogo: ambito siempre 1 ("Nacional" si la contraparte es de México, "Internacional" si es de otro país); estado 0-1 (de la contraparte); ciudad 0-1: municipio de la contraparte (nunca el de la UAGro) que pertenezca a ese estado; puede ser nueva. Escribe el nombre oficial del municipio con acentos y corrige errores de lectura evidentes de un municipio que conozcas ("Huachinango, Pue." → "Huauchinango"); si no estás seguro, omítela. tema 0-4 (solo existentes). No incluyas facultades.
-7. No inventes: dato ausente o dudoso → null. "notas": una frase solo si falta un dato clave o hay una incongruencia; si no, null.`
+7. No inventes: dato ausente o dudoso → null. "notas": máximo una frase con lo que el usuario deba revisar en el documento: un dato clave que no consta (contraparte, fecha de firma o vigencia) o una contradicción que no pudiste resolver. No menciones datos secundarios que falten (domicilio, siglas, testigos) ni errores de lectura que ya resolviste (lo que pongas en "correcciones" no va en "notas"); si no hay nada que revisar, null.`
 
 // correctionsRule se agrega solo cuando el texto incluye páginas transcritas
 // por el modelo de visión, para no gastar tokens en PDF con texto nativo.
 const correctionsRule = `
-8. El texto incluye páginas transcritas desde imágenes ([Página N]) que pueden traer errores de lectura; "[?]" marca palabras dudosas. Compara cada nombre propio (personas, instituciones, lugares) en todas sus apariciones. Si dos variantes son la misma entidad (mismo cargo o contexto) y difieren solo en letras de forma parecida ("García"/"Garay", "rn"/"m", "cl"/"d", "l"/"1"), usa en tus campos la variante mejor respaldada (más repetida, más legible o del texto nativo) y agrégala a "correcciones" con el nombre completo (2 o más palabras) tal como aparece: {"original": variante errónea, "correcto": variante buena}. Si son personas o entidades distintas, no corrijas. Máximo 10.`
+8. El texto incluye páginas transcritas desde imágenes ([Página N]) que pueden traer errores de lectura; "[?]" marca palabras dudosas. Lo que peor se lee son los bloques de firmas, los sellos y las anotaciones al margen, porque las firmas y los sellos tapan letras; el proemio y las declaraciones suelen leerse mejor. Una diferencia entre dos lecturas del mismo dato suele ser un error de lectura; solo es una incongruencia del documento si ambas lecturas son claras.
+- Nombres: compara cada nombre propio (personas, instituciones, lugares) en todas sus apariciones. Si dos variantes son la misma persona o entidad (la misma parte con el mismo cargo, o el mismo contexto), es un error de lectura aunque difieran muchas letras ("María Elena Ríos Vega" en el proemio y "Mario Elías Ruiz Vega" bajo la firma de la misma parte; "García"/"Garay"; "rn"/"m"): usa en tus campos la variante mejor respaldada (más repetida, del proemio o las declaraciones, o del texto nativo) y agrégala a "correcciones" con el nombre completo (2 o más palabras) tal como aparece: {"original": variante errónea, "correcto": variante buena}. Máximo 10. Si son personas distintas (otra parte u otro cargo), no corrijas.
+- Fechas: si la firma aparece con dos fechas distintas, descarta la tachada o la imposible y aplica la regla 4. Los meses y los años escritos con letra se confunden al leer ("septiembre"/"noviembre", "veinticinco"/"veintiséis").
+- "dudas": si corregiste un nombre cuyas variantes difieren en más que letras de forma parecida, o elegiste entre dos fechas, agrega {"paginas":[página o páginas donde está la lectura dudosa],"dato":qué hay que verificar (en fechas, también si alguna está tachada),"lecturas":[las variantes tal como aparecen]} para revisarlo con la imagen. Máximo 3.`
 
 const noCorrectionsRule = `
-8. "correcciones": [].`
+8. "correcciones": [] y "dudas": [].`
 
 // Extract llama al modelo y devuelve los campos ya validados. transcrito indica
 // que el texto incluye páginas leídas por visión y activa la revisión de nombres.
@@ -301,6 +319,10 @@ func (c *Client) Extract(ctx context.Context, texto string, catalogo []Tag, tran
 		system = systemPrompt + correctionsRule
 	}
 	prompt := catalogText(catalogo) + "\nTexto del convenio:\n<<<\n" + texto + "\n>>>"
+	if c.ReferenceDate != "" {
+		// Va en el mensaje del usuario para no romper la caché del prompt fijo.
+		prompt = "Fecha de registro del documento: " + c.ReferenceDate + "\n" + prompt
+	}
 	body := map[string]interface{}{
 		"model":            c.Model,
 		"temperature":      0.1,
@@ -334,13 +356,68 @@ func (c *Client) Extract(ctx context.Context, texto string, catalogo []Tag, tran
 		}
 		if transcrito {
 			ext.Correcciones = parseCorrections(raw["correcciones"])
+			ext.Dudas = parseDoubts(raw["dudas"])
 		}
+		c.checkSignatureDate(&ext)
 		if c.WebSearch {
 			c.enrichLocation(ctx, &ext, catalogo)
 		}
 		return ext, nil
 	}
 	return out, errors.New("la extracción con IA se cortó por longitud incluso con más tokens; intente con un PDF más corto")
+}
+
+// checkSignatureDate avisa cuando la fecha de firma es posterior al registro
+// del documento: nadie sube un convenio antes de firmarlo, así que es un error
+// de lectura (por ejemplo, «noviembre» en lugar de «septiembre»).
+func (c *Client) checkSignatureDate(ext *Extraction) {
+	if c.ReferenceDate == "" || ext.FechaFirma == "" || ext.FechaFirma <= c.ReferenceDate {
+		return
+	}
+	shown := ext.FechaFirma
+	if t, err := time.Parse("2006-01-02", ext.FechaFirma); err == nil {
+		shown = t.Format("02/01/2006")
+	}
+	note := "La fecha de firma leída (" + shown + ") es posterior al registro del documento; revísela."
+	ext.Notas = strings.TrimSpace(ext.Notas + " " + note)
+}
+
+func parseDoubts(v interface{}) []Doubt {
+	list, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	var out []Doubt
+	for _, item := range list {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		var d Doubt
+		d.Dato = truncate(strings.TrimSpace(fmt.Sprint(m["dato"])), 200)
+		if pages, ok := m["paginas"].([]interface{}); ok {
+			for _, p := range pages {
+				if n := asInt(p); n > 0 && len(d.Paginas) < 3 {
+					d.Paginas = append(d.Paginas, n)
+				}
+			}
+		}
+		if lecturas, ok := m["lecturas"].([]interface{}); ok {
+			for _, l := range lecturas {
+				if s, ok := l.(string); ok && strings.TrimSpace(s) != "" && len(d.Lecturas) < 4 {
+					d.Lecturas = append(d.Lecturas, truncate(strings.TrimSpace(s), 160))
+				}
+			}
+		}
+		if d.Dato == "" || d.Dato == "<nil>" || len(d.Paginas) == 0 {
+			continue
+		}
+		out = append(out, d)
+		if len(out) >= 3 {
+			break
+		}
+	}
+	return out
 }
 
 func parseCorrections(v interface{}) []Correction {
@@ -467,6 +544,8 @@ Reglas:
 - Literal y completo: no resumas, no traduzcas ni corrijas ortografía. Conserva títulos, párrafos, numeración de cláusulas y acentos.
 - Nombres propios, cargos, cifras y fechas: léelos letra por letra y no los cambies por palabras o apellidos más comunes. Si dudas de una palabra, escribe tu mejor lectura seguida de [?], por ejemplo: Garay[?].
 - Ilegible: [ilegible]. Firmas y logotipos: solo [Firma] o [Logotipo], sin describirlos. Sellos: [Sello] o, si su texto se lee, [Sello: texto].
+- Texto tachado o cruzado por una línea: [Tachado: texto]. Anotaciones a mano: [Manuscrito: texto].
+- Bajo una firma o un sello, el nombre impreso suele estar tapado: léelo con cuidado y, si dudas, márcalo con [?]; no lo sustituyas por otro nombre.
 - Tablas: una fila por línea con celdas separadas por " | ".
 - Página sin texto: responde exactamente [Página sin texto]`
 
@@ -516,6 +595,103 @@ func (c *Client) TranscribeImage(ctx context.Context, imageBase64 string, page i
 		}
 	}
 	return "", errors.New("la transcripción se cortó por longitud incluso con más tokens; intente de nuevo")
+}
+
+// verificationPrompt pide una segunda lectura enfocada en los datos que la
+// transcripción leyó de formas distintas.
+const verificationPrompt = `Verificas la lectura de una página escaneada de un convenio de la UAGro (México). Una transcripción automática leyó algunos datos de formas distintas en el documento; en esta página pudieron leerse mal (las firmas, sellos y rúbricas suelen tapar letras).
+Para cada duda, mira la imagen con atención, letra por letra, en el lugar donde aparece el dato, y fíjate también si ese texto está tachado (cruzado por una línea horizontal) o corregido a mano. Responde solo JSON: {"correcciones":[{"original":s,"correcto":s}]}
+- Corrige solo los fragmentos de las dudas. No cambies nada más (ni ortografía, ni gramática, ni otras palabras), aunque veas otros errores.
+- "original": el fragmento tal como está en la transcripción de esta página, copiado exacto (de 1 a 12 palabras).
+- "correcto": lo que dice la imagen en ese mismo lugar; si ese texto está tachado, "[Tachado: texto]".
+- Si la transcripción coincide con la imagen o no se distingue, devuelve {"correcciones":[]}.`
+
+// VerifyPage vuelve a mirar una página con las dudas de lectura del documento
+// y devuelve las correcciones que la imagen confirma.
+func (c *Client) VerifyPage(ctx context.Context, imageBase64 string, page int, transcripcion string, dudas []Doubt) ([]Correction, error) {
+	if c.APIKey == "" {
+		return nil, errors.New("no hay una clave de IA configurada")
+	}
+	if strings.TrimSpace(imageBase64) == "" || len(dudas) == 0 {
+		return nil, nil
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Página %d.\nDudas:\n", page)
+	for _, d := range dudas {
+		b.WriteString("- " + d.Dato)
+		if len(d.Lecturas) > 0 {
+			b.WriteString(": se leyó «" + strings.Join(d.Lecturas, "» y «") + "»")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("Transcripción actual de esta página:\n<<<\n" + truncate(transcripcion, 12000) + "\n>>>")
+	body := map[string]interface{}{
+		"model":            c.VisionModel,
+		"temperature":      0.0,
+		"reasoning_effort": EffortLow,
+		"response_format":  map[string]string{"type": "json_object"},
+		"messages": []map[string]interface{}{
+			{"role": "system", "content": verificationPrompt},
+			{"role": "user", "content": []map[string]interface{}{
+				{"type": "text", "text": b.String()},
+				{"type": "image_url", "image_url": map[string]string{
+					"url": "data:image/jpeg;base64," + imageBase64,
+				}},
+			}},
+		},
+	}
+	for _, limit := range []int{8000, 16000} {
+		body["max_tokens"] = limit
+		content, finish, err := c.chat(ctx, body)
+		if err != nil {
+			return nil, err
+		}
+		if finish == "length" {
+			continue
+		}
+		raw, err := parseJSON(content)
+		if err != nil {
+			return nil, err
+		}
+		return relevantCorrections(parseCorrections(raw["correcciones"]), dudas), nil
+	}
+	return nil, errors.New("la verificación con la imagen se cortó por longitud")
+}
+
+// relevantCorrections descarta lo que el modelo corrigió fuera de las dudas
+// (por ejemplo, la gramática del documento): el fragmento original debe
+// compartir una palabra significativa con alguna de las lecturas en duda.
+func relevantCorrections(cors []Correction, dudas []Doubt) []Correction {
+	words := map[string]bool{}
+	for _, d := range dudas {
+		for _, l := range d.Lecturas {
+			for _, w := range significantWords(l) {
+				words[w] = true
+			}
+		}
+	}
+	var out []Correction
+	for _, c := range cors {
+		for _, w := range significantWords(c.Original) {
+			if words[w] {
+				out = append(out, c)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// significantWords devuelve las palabras de 4 letras o más, sin acentos ni
+// signos, más los números ("4", "2026").
+func significantWords(s string) []string {
+	var out []string
+	for _, w := range strings.FieldsFunc(key(s), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		if len([]rune(w)) >= 4 || (w[0] >= '0' && w[0] <= '9') {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 // catalogText lista las etiquetas que el modelo puede usar. Las facultades no
@@ -601,6 +777,7 @@ func interpret(raw map[string]interface{}, catalogo []Tag) (Extraction, error) {
 	out.DependenciaCorta = truncate(get("dependencia_corta"), 60)
 	out.TipoDocumento = truncate(get("tipo_documento"), 80)
 	out.Domicilio = truncate(get("domicilio"), 200)
+	out.LugarFirma = truncate(get("lugar_firma"), 120)
 	// Si el modelo no lo dice, se asume que es un convenio.
 	out.EsConvenio = true
 	if v, ok := raw["es_convenio"]; ok && v != nil {

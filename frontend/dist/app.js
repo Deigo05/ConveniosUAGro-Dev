@@ -1348,6 +1348,51 @@ async function processAutoFile(id) {
   await loadList();
 }
 
+// renderPageJPEG dibuja una página del PDF y la devuelve como JPEG en base64.
+// maxSide limita el lado mayor en píxeles y maxScale el aumento.
+async function renderPageJPEG(pdf, pageNumber, maxSide, maxScale, quality) {
+  const page = await pdf.getPage(pageNumber);
+  const base = page.getViewport({ scale: 1 });
+  const scale = Math.min(maxScale, maxSide / Math.max(base.width, base.height));
+  const viewport = page.getViewport({ scale: Math.max(scale, 0.8) });
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  const base64 = canvas.toDataURL('image/jpeg', quality).split(',')[1];
+  canvas.width = canvas.height = 0;
+  return base64;
+}
+
+// verifyDoubts vuelve a mirar, con más resolución, las páginas donde la
+// extracción encontró lecturas contradictorias (un nombre distinto en el
+// proemio y bajo la firma, dos fechas de firma). Si la imagen confirma la
+// lectura correcta, el servidor corrige la transcripción y vuelve a extraer
+// los datos. Devuelve la ficha actualizada o null si no había dudas.
+async function verifyDoubts(id, pdf = null) {
+  const pages = await call('PagesToVerify', id);
+  if (!pages || !pages.length || !window.pdfjsLib) return null;
+  setDocActivity(id, 'IA: revisando dudas de lectura con la imagen…');
+  let doc = pdf;
+  try {
+    doc = doc || await window.pdfjsLib.getDocument({ url: `/pdf/${id}` }).promise;
+    const images = [];
+    for (const n of pages) {
+      if (n >= 1 && n <= doc.numPages) images.push({ pagina: n, imagen: await renderPageJPEG(doc, n, 2400, 2.2, 0.9) });
+    }
+    return images.length ? await call('VerifyAI', id, images) : null;
+  } catch (err) {
+    console.error(err);
+    showToast('No se pudieron revisar las dudas de lectura con la imagen: ' + errorText(err), 'error');
+    return null;
+  } finally {
+    if (doc && !pdf) doc.destroy().catch(() => {});
+  }
+}
+
 async function transcribeConvention(id, options = {}) {
   const auto = Boolean(options.auto);
   if (state.transcribing.has(id)) {
@@ -1395,19 +1440,7 @@ async function transcribeConvention(id, options = {}) {
       await acquirePageSlot();
       try {
         if (failed) return;
-        const page = await pdf.getPage(pageNumber);
-        const viewportBase = page.getViewport({ scale: 1 });
-        const scale = Math.min(1.45, 1600 / Math.max(viewportBase.width, viewportBase.height));
-        const viewport = page.getViewport({ scale: Math.max(scale, 0.8) });
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.ceil(viewport.width);
-        canvas.height = Math.ceil(viewport.height);
-        const ctx = canvas.getContext('2d', { alpha: false });
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({ canvasContext: ctx, viewport }).promise;
-        const base64 = canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
-        canvas.width = canvas.height = 0;
+        const base64 = await renderPageJPEG(pdf, pageNumber, 1600, 1.45, 0.82);
         const status = await call('TranscribePage', id, pageNumber, base64);
         if (state.current?.id === id) {
           state.current.paginas_transcritas = status.paginas_transcritas;
@@ -1437,6 +1470,7 @@ async function transcribeConvention(id, options = {}) {
       setDocActivity(id, 'IA: extrayendo datos…');
       try {
         await call('ExtractAI', id);
+        await verifyDoubts(id, pdf);
         if (state.current?.id === id) {
           state.current = await call('GetConvenio', id);
           renderDetail();
@@ -1480,6 +1514,14 @@ async function extractAI() {
   try {
     state.current = await call('ExtractAI', c.id);
     renderDetail();
+    $('#ai-status').textContent = 'Revisando dudas de lectura…';
+    const verified = await verifyDoubts(c.id);
+    setDocActivity(c.id, '');
+    $('#ai-status').textContent = '';
+    if (verified && state.current?.id === c.id) {
+      state.current = verified;
+      renderDetail();
+    }
     await refreshData();
     await loadList();
     showToast('Análisis completado. Revisa los datos y las sugerencias.', 'success');
