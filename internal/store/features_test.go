@@ -99,6 +99,44 @@ func TestSearchFindsSignatoriesTagsAndFallback(t *testing.T) {
 	}
 }
 
+// Buscar el nombre de un convenio lo pone primero aunque sus palabras también
+// sean el inicio de palabras comunes ("par" de "para", "3" de "39070").
+func TestSearchRanksNameFirst(t *testing.T) {
+	st, paths := testStore(t)
+	comun := strings.Repeat("Las partes acuerdan para los grupos de estudiantes, C.P. 39070, cláusula 3. ", 20)
+	add := func(n int, dependencia, texto string) int64 {
+		id := insertWithPDF(t, st, paths, strings.Repeat(string(rune('d'+n)), 32)+".pdf", "sha-rank-"+dependencia, texto)
+		if err := st.Update(ConventionInput{ID: id, Dependencia: dependencia}); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	target := add(0, "GRUPO PAR DE 3 S DE RL DE CV", "Convenio con GRUPO PAR DE 3 para prácticas.")
+	mention := add(1, "Grupo Vidanta", comun+"Antes colaboró con Grupo Par de 3.")
+	add(2, "ALFARO GRUPO APÍCOLA", comun)
+	add(3, "Instituto Municipal de la Juventud", comun)
+	// En el texto, la frase exacta gana a la que solo coincide como prefijo ("podrán").
+	frase := add(4, "Hotel Uno", comun+"El presente convenio podrá modificarse por escrito.")
+	add(5, "Hotel Dos", strings.Repeat("El presente convenio podrán modificarlo las partes; ninguna podrá cederlo. ", 3))
+	for q, want := range map[string][]int64{
+		"GRUPO PAR DE 3":          {target, mention},
+		"grupo par":               {target},
+		"grupo par de":            {target},
+		"par 3":                   {target},
+		"presente convenio podrá": {frase},
+	} {
+		res, err := st.List(ListFilter{Query: q, Order: "relevancia"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i, id := range want {
+			if len(res.Items) <= i || res.Items[i].ID != id {
+				t.Fatalf("búsqueda %q: resultado %d = %+v, se esperaba el id %d", q, i+1, res.Items, id)
+			}
+		}
+	}
+}
+
 func TestApplyNameCorrections(t *testing.T) {
 	st, paths := testStore(t)
 	id := insertWithPDF(t, st, paths, strings.Repeat("c", 32)+".pdf", "sha-c", "")

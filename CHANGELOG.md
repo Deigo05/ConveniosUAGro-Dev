@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.3] - 2026-10-24
+
+### Corregido
+
+- **Orden de la búsqueda**: buscar el nombre de un convenio lo muestra primero. Antes, al buscar «GRUPO PAR DE 3», salían antes otros convenios porque «par» y «3» también son el inicio de «para», «partes» o «39070», que aparecen en casi todos, y el orden quedaba casi al azar. Ahora van primero los convenios cuyo nombre contiene lo buscado tal cual, luego los que tienen la frase exacta en cualquier campo, incluido el texto transcrito («presente convenio podrá» ya no queda detrás de «podrán»), luego los que tienen todas las palabras completas y, al final, el resto, con más peso para el nombre que para el texto.
+
 ## [1.2.2] - 2026-10-24
 
 ### Cambiado
