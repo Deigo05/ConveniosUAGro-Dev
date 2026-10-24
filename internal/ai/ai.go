@@ -15,15 +15,26 @@ import (
 	"time"
 	"unicode"
 
+	"convenios-uagro-desktop/internal/uagro"
+
 	"golang.org/x/text/unicode/norm"
 )
 
-const maxTextChars = 45000
+// Límites del texto enviado al modelo. Un convenio típico cabe completo; en los
+// largos se conserva el proemio, el cierre con firmas y los párrafos clave.
+const (
+	maxTextChars  = 32000
+	headChars     = 16000
+	tailChars     = 9000
+	keywordsChars = 7000
+)
 
 // Tag is one item of the local catalog sent to the model.
 type Tag struct {
 	Nombre string
 	Tipo   string
+	// Estado acompaña a las ciudades para que el modelo no las mezcle.
+	Estado string
 }
 
 // Suggestion is a tag proposed by the model.
@@ -36,6 +47,8 @@ type Suggestion struct {
 // Extraction is the validated result ready to save.
 type Extraction struct {
 	Dependencia         string
+	DependenciaCorta    string
+	TipoDocumento       string
 	FirmanteDependencia string
 	CargoDependencia    string
 	FirmanteUAGro       string
@@ -50,6 +63,64 @@ type Extraction struct {
 	Notas               string
 	Estado              string
 	Sugerencias         []Suggestion
+	Correcciones        []Correction
+	// Renovacion indica que el documento dice renovar o sustituir un convenio
+	// anterior con la misma contraparte; FechaAnterior es la firma de ese
+	// convenio si el texto la menciona.
+	Renovacion    bool
+	FechaAnterior string
+	// EsConvenio es false si el archivo no es un convenio (un acta, un
+	// oficio, una constancia…); el motivo va en Notas.
+	EsConvenio bool
+	// Domicilio es el de la contraparte tal como aparece; ayuda a buscar su
+	// ciudad en la web.
+	Domicilio string
+}
+
+// Correction es un nombre que el modelo considera mal leído en una página
+// transcrita; Original y Correcto aparecen tal cual en el texto.
+type Correction struct {
+	Original string `json:"original"`
+	Correcto string `json:"correcto"`
+}
+
+// Niveles de razonamiento admitidos para la extracción.
+const (
+	EffortLow    = "low"
+	EffortMedium = "medium"
+	EffortHigh   = "high"
+)
+
+// NormalizeEffort devuelve un nivel válido; el predeterminado es el bajo,
+// que en las pruebas extrajo los mismos datos que el medio en un tercio del
+// tiempo.
+func NormalizeEffort(e string) string {
+	switch strings.ToLower(strings.TrimSpace(e)) {
+	case EffortMedium:
+		return EffortMedium
+	case EffortHigh:
+		return EffortHigh
+	default:
+		return EffortLow
+	}
+}
+
+// apiEffort traduce el nivel de la aplicación al valor que entiende el
+// proveedor. DeepSeek solo distingue low, high y max ("medium" equivale a
+// high), así que cada nivel de la aplicación es uno distinto del servicio.
+func (c *Client) apiEffort(level string) string {
+	level = NormalizeEffort(level)
+	if !strings.Contains(strings.ToLower(c.BaseURL), "deepseek") {
+		return level
+	}
+	switch level {
+	case EffortMedium:
+		return "high"
+	case EffortHigh:
+		return "max"
+	default:
+		return "low"
+	}
 }
 
 // Client calls the configured OpenAI-compatible endpoint.
@@ -59,7 +130,9 @@ type Client struct {
 	Model       string
 	VisionModel string
 	WebSearch   bool
-	HTTP        *http.Client
+	// Effort es el nivel de razonamiento de la extracción (low, medium, high).
+	Effort string
+	HTTP   *http.Client
 }
 
 func New(apiKey, baseURL, model, visionModel string) *Client {
@@ -78,34 +151,73 @@ func New(apiKey, baseURL, model, visionModel string) *Client {
 		Model:       strings.TrimSpace(model),
 		VisionModel: strings.TrimSpace(visionModel),
 		WebSearch:   true,
-		HTTP:        &http.Client{Timeout: 300 * time.Second},
+		Effort:      EffortLow,
+		HTTP:        sharedHTTP,
 	}
+}
+
+// sharedHTTP reutiliza las conexiones entre peticiones simultáneas (varias
+// páginas y documentos a la vez) en lugar de abrir una por petición.
+var sharedHTTP = &http.Client{
+	Timeout: 300 * time.Second,
+	Transport: func() http.RoundTripper {
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.MaxIdleConnsPerHost = 16
+		return t
+	}(),
+}
+
+// Reintentos ante errores pasajeros (servicio saturado, red caída): la
+// espera crece en cada intento.
+var retryDelays = []time.Duration{3 * time.Second, 10 * time.Second}
+
+type httpStatusError int
+
+func (e httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", int(e)) }
+
+func transient(err error) bool {
+	var st httpStatusError
+	if errors.As(err, &st) {
+		return st == http.StatusTooManyRequests || st >= 500
+	}
+	return err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
 // chat hace una petición y devuelve el contenido y el motivo de finalización.
 // Permite reintentar con más tokens cuando el modelo de razonamiento se corta.
+// Los errores pasajeros (429, 5xx, red) se reintentan con espera creciente.
 func (c *Client) chat(ctx context.Context, body map[string]interface{}) (string, string, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return "", "", err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(payload))
-	if err != nil {
-		return "", "", err
+	var data []byte
+	status := 0
+	for attempt := 0; ; attempt++ {
+		data, status, err = c.post(ctx, payload)
+		if err == nil && status >= 200 && status < 300 {
+			break
+		}
+		if err == nil {
+			err = httpStatusError(status)
+		}
+		if attempt >= len(retryDelays) || !transient(err) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", "", errors.New("el servicio de IA tardó demasiado en responder")
+		case <-time.After(retryDelays[attempt]):
+		}
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.APIKey)
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
+	if err != nil && status == 0 {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return "", "", errors.New("el servicio de IA tardó demasiado en responder")
 		}
 		return "", "", errors.New("no se pudo conectar con el servicio de IA")
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		switch resp.StatusCode {
+	if status < 200 || status >= 300 {
+		switch status {
 		case http.StatusUnauthorized, http.StatusForbidden:
 			return "", "", errors.New("la clave de IA es inválida")
 		case http.StatusTooManyRequests:
@@ -113,7 +225,7 @@ func (c *Client) chat(ctx context.Context, body map[string]interface{}) (string,
 		case http.StatusBadRequest:
 			return "", "", errors.New("el servicio rechazó la solicitud; si es una imagen, revise el modelo de visión en Ajustes")
 		default:
-			return "", "", fmt.Errorf("el servicio de IA respondió con error (%d)", resp.StatusCode)
+			return "", "", fmt.Errorf("el servicio de IA respondió con error (%d)", status)
 		}
 	}
 	var apiResp struct {
@@ -130,98 +242,177 @@ func (c *Client) chat(ctx context.Context, body map[string]interface{}) (string,
 	return apiResp.Choices[0].Message.Content, apiResp.Choices[0].FinishReason, nil
 }
 
-const systemPrompt = `Eres un asistente que extrae datos de convenios firmados por la Universidad Autónoma de Guerrero (UAGro), México.
-Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional ni bloques de código, con exactamente estas claves:
-{
-  "dependencia": string|null,
-  "firmante_dependencia": string|null,
-  "cargo_dependencia": string|null,
-  "firmante_uagro": string|null,
-  "cargo_uagro": string|null,
-  "facultad": string|null,
-  "facultad_ciudad": string|null,
-  "fecha_firma": "YYYY-MM-DD"|null,
-  "fecha_firma_texto": string|null,
-  "vigencia_tipo": "fecha_exacta"|"duracion"|"indefinida"|"no_encontrada",
-  "fecha_vigencia": "YYYY-MM-DD"|null,
-  "vigencia_duracion": {"anios": int, "meses": int, "dias": int}|null,
-  "vigencia_desde_firma": boolean,
-  "vigencia_texto": string|null,
-  "confianza": "alta"|"media"|"baja",
-  "etiquetas": [{"tipo": "ambito"|"estado"|"ciudad"|"tema"|"facultad", "nombre": string, "nueva": boolean}],
-  "notas": string|null
+func (c *Client) post(ctx context.Context, payload []byte) ([]byte, int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	// Con el servicio saturado, DeepSeek envía líneas vacías mientras espera;
+	// json.Unmarshal las ignora como espacio en blanco.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, 0, err
+	}
+	return data, resp.StatusCode, nil
 }
-Reglas:
-- "dependencia": nombre oficial completo de la institución, dependencia u organismo contraparte con quien la UAGro celebra el convenio. NUNCA la propia UAGro ni sus facultades. Si hay varias contrapartes, sepáralas con "; ".
-- "firmante_dependencia" y "cargo_dependencia": nombre completo y cargo de la persona que firma por la dependencia u organismo contraparte. Búscalos al final del documento, junto a firmas y sellos.
-- "firmante_uagro" y "cargo_uagro": nombre completo y cargo de la persona que firma por la UAGro o por la facultad universitaria.
-- "facultad": nombre oficial de la facultad, escuela o unidad académica de la UAGro que celebra el convenio. Incluye el número (01, 02, etc.) si forma parte del nombre. No incluyas la ciudad; usa "facultad_ciudad" para eso. Si no aparece, usa null.
-- "facultad_ciudad": ciudad o sede donde se ubica esa facultad de la UAGro. No es la ciudad de la dependencia ni de la contraparte. Ejemplo: si el documento dice "FACULTAD DE TURISMO ACAPULCO" y la contraparte está en Tijuana, facultad_ciudad debe ser "Acapulco". Si no hay certeza, usa null.
-- "fecha_firma": fecha de firma. Convierte fechas escritas en palabras o con meses en español a YYYY-MM-DD. "fecha_firma_texto": fragmento literal.
-- Vigencia:
-  - Fecha de término concreta: vigencia_tipo="fecha_exacta" y "fecha_vigencia".
-  - Duración ("tres años a partir de su firma"): vigencia_tipo="duracion", "vigencia_duracion" y "vigencia_desde_firma"=true solo si cuenta desde la firma. Deja "fecha_vigencia" en null; el sistema la calcula.
-  - Indefinida o por tiempo indeterminado: vigencia_tipo="indefinida".
-  - "vigencia_texto": copia literal (máximo 300 caracteres) de la cláusula.
-- "etiquetas": hasta 8 etiquetas relevantes.
-  - ambito: 0 o 1, exactamente "Nacional" o "Internacional".
-  - estado: 0 o 1, el estado donde se ubica la dependencia u organismo contraparte; no el de la UAGro si son distintos. Solo un nombre de la lista de estados existentes.
-  - ciudad: 0 o 1. Debe ser la ciudad donde se ubica la dependencia u organismo contraparte, NO la ciudad de la UAGro. Usa el nombre existente si aparece; si no y hay certeza, propón una nueva con "nueva": true. Nunca propongas más de una ciudad.
-  - tema: 0 a 4, solo nombres de temas existentes. No inventes temas.
-  - facultad: no la uses en "etiquetas"; el nombre de la facultad se extrae en el campo "facultad" y el sistema crea su etiqueta.
-  - No repitas etiquetas. Si no hay certeza, no la incluyas.
-- No inventes datos. Si falta un dato, usa null y explícalo brevemente en "notas".`
 
-// Extract llama al modelo y devuelve los campos ya validados.
-func (c *Client) Extract(ctx context.Context, texto string, catalogo []Tag) (Extraction, error) {
+// systemPrompt es breve a propósito: cada regla evita un error observado en
+// convenios reales (fechas de nombramiento, testigos, facultad inventada…).
+var systemPrompt = `Extraes datos de convenios de la Universidad Autónoma de Guerrero (UAGro), México. Responde solo con un objeto JSON con estas claves:
+{"es_convenio":b,"tipo_documento":"Convenio General"|"Convenio Específico"|"Convenio Marco"|"Convenio de Colaboración"|"Convenio Modificatorio"|"Carta de Intención"|"Contrato"|"Acuerdo"|"Otro"|null,"dependencia":s|null,"dependencia_corta":s|null,"domicilio":s|null,"firmante_dependencia":s|null,"cargo_dependencia":s|null,"firmante_uagro":s|null,"cargo_uagro":s|null,"facultad":s|null,"facultad_ciudad":s|null,"fecha_firma":"AAAA-MM-DD"|null,"fecha_firma_texto":s|null,"vigencia_tipo":"fecha_exacta"|"duracion"|"indefinida"|"no_encontrada","fecha_vigencia":"AAAA-MM-DD"|null,"vigencia_duracion":{"anios":n,"meses":n,"dias":n}|null,"vigencia_inicio":"firma"|"AAAA-MM-DD"|null,"vigencia_texto":s|null,"etiquetas":[{"tipo":"ambito"|"estado"|"ciudad"|"tema","nombre":s}],"correcciones":[{"original":s,"correcto":s}],"renovacion":{"es":b,"fecha_anterior":"AAAA-MM-DD"|null},"notas":s|null}
+Reglas:
+0. "es_convenio": false si el archivo no es un convenio, acuerdo, contrato o carta de intención entre la UAGro y otra parte (por ejemplo: acta constitutiva, poder notarial, oficio, constancia, certificado, identificación, factura); di qué es en "notas" y llena solo lo que conste.
+1. Partes: búscalas en el proemio ("CONVENIO ... QUE CELEBRAN ...") y en las declaraciones. "dependencia" es la contraparte con su nombre oficial completo; nunca la UAGro ni sus facultades. Varias contrapartes: sepáralas con "; ". "dependencia_corta": sus siglas oficiales si aparecen en el texto ("IMSS", "SEG") o un nombre corto de máximo 40 caracteres ("Ayuntamiento de Acapulco"). "tipo_documento": según el título del documento; "Convenio Modificatorio" incluye addenda. "domicilio": el de la contraparte tal como aparece (máximo 150 caracteres).
+2. Firmantes: nombre y cargo del bloque de firmas final; si no se lee, de las declaraciones. Nombre sin grados ni tratamientos (Dr., Mtra., Lic., C.). Testigos, testigos de honor y notarios no son firmantes.
+3. "facultad": solo si el texto dice expresamente que una facultad, escuela o unidad académica de la UAGro celebra, suscribe o participa (o firma su director). Si firma la Rectoría o la universidad en general sin nombrar una unidad académica, usa null. Escribe el nombre oficial del catálogo, sin ciudad: los nombres anteriores o abreviados son la misma unidad ("Unidad Académica de Turismo", "UAGro-FT" → "Facultad de Turismo"; "EMVZ No. 3" → "Escuela Superior de Medicina Veterinaria y Zootecnia 03"). Si no está en el catálogo, cópiala tal como aparece. "facultad_ciudad": sede de la facultad según el catálogo o el domicilio de la UAGro en el documento, nunca la ciudad de la contraparte; null si no consta. Catálogo (nombre y sedes): ` + uagro.CatalogText() + `.
+4. "fecha_firma": la del cierre ("firmado en ... a los X días del mes de ... de ..."); nunca fechas de nombramientos, decretos, actas o publicaciones. "fecha_firma_texto": ese fragmento literal. "renovacion.es": true solo si el documento dice que renueva, sustituye o da continuidad a un convenio anterior con la misma contraparte (no basta con citarlo en antecedentes); "fecha_anterior": la firma de ese convenio anterior si consta.
+5. Vigencia: fecha de término explícita → "fecha_exacta". Plazo ("tres años") → "duracion" con "vigencia_duracion" y "vigencia_inicio" ("firma" si cuenta desde la firma, o la fecha de inicio indicada); "fecha_vigencia" queda null porque el sistema la calcula. Tiempo indefinido o indeterminado → "indefinida". "vigencia_texto": cita literal de la cláusula, máximo 300 caracteres.
+6. "etiquetas" con nombres exactos del catálogo: ambito siempre 1 ("Nacional" si la contraparte es de México, "Internacional" si es de otro país); estado 0-1 (de la contraparte); ciudad 0-1: municipio de la contraparte (nunca el de la UAGro) que pertenezca a ese estado; puede ser nueva. Escribe el nombre oficial del municipio con acentos y corrige errores de lectura evidentes de un municipio que conozcas ("Huachinango, Pue." → "Huauchinango"); si no estás seguro, omítela. tema 0-4 (solo existentes). No incluyas facultades.
+7. No inventes: dato ausente o dudoso → null. "notas": una frase solo si falta un dato clave o hay una incongruencia; si no, null.`
+
+// correctionsRule se agrega solo cuando el texto incluye páginas transcritas
+// por el modelo de visión, para no gastar tokens en PDF con texto nativo.
+const correctionsRule = `
+8. El texto incluye páginas transcritas desde imágenes ([Página N]) que pueden traer errores de lectura; "[?]" marca palabras dudosas. Compara cada nombre propio (personas, instituciones, lugares) en todas sus apariciones. Si dos variantes son la misma entidad (mismo cargo o contexto) y difieren solo en letras de forma parecida ("García"/"Garay", "rn"/"m", "cl"/"d", "l"/"1"), usa en tus campos la variante mejor respaldada (más repetida, más legible o del texto nativo) y agrégala a "correcciones" con el nombre completo (2 o más palabras) tal como aparece: {"original": variante errónea, "correcto": variante buena}. Si son personas o entidades distintas, no corrijas. Máximo 10.`
+
+const noCorrectionsRule = `
+8. "correcciones": [].`
+
+// Extract llama al modelo y devuelve los campos ya validados. transcrito indica
+// que el texto incluye páginas leídas por visión y activa la revisión de nombres.
+func (c *Client) Extract(ctx context.Context, texto string, catalogo []Tag, transcrito bool) (Extraction, error) {
 	var out Extraction
 	if c.APIKey == "" {
 		return out, errors.New("no hay una clave de IA configurada")
 	}
-	texto = strings.TrimSpace(texto)
+	texto = CompactText(texto, maxTextChars)
 	if texto == "" {
 		return out, errors.New("el PDF no tiene texto seleccionable; capture los datos manualmente")
 	}
-	if len([]rune(texto)) > maxTextChars {
-		runes := []rune(texto)
-		texto = string(runes[:maxTextChars])
+	system := systemPrompt + noCorrectionsRule
+	if transcrito {
+		system = systemPrompt + correctionsRule
 	}
-	prompt := catalogText(catalogo) + "\n\nTexto del convenio:\n<<<\n" + texto + "\n>>>"
+	prompt := catalogText(catalogo) + "\nTexto del convenio:\n<<<\n" + texto + "\n>>>"
 	body := map[string]interface{}{
 		"model":            c.Model,
 		"temperature":      0.1,
-		"max_tokens":       16000,
-		"reasoning_effort": "high",
+		"reasoning_effort": c.apiEffort(c.Effort),
 		"response_format":  map[string]string{"type": "json_object"},
 		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
+			{"role": "system", "content": system},
 			{"role": "user", "content": prompt},
 		},
 	}
-	var content, finish string
-	var err error
-	for _, limit := range []int{16000, 32000} {
+	limits := []int{12000, 24000}
+	if NormalizeEffort(c.Effort) != EffortLow {
+		limits = []int{24000, 48000}
+	}
+	for _, limit := range limits {
 		body["max_tokens"] = limit
-		content, finish, err = c.chat(ctx, body)
+		content, finish, err := c.chat(ctx, body)
 		if err != nil {
 			return out, err
 		}
-		if finish != "length" {
-			raw, err := parseJSON(content)
-			if err != nil {
-				return out, err
-			}
-			ext, err := interpret(raw, catalogo)
-			if err != nil {
-				return out, err
-			}
-			if c.WebSearch {
-				c.enrichLocation(ctx, &ext, catalogo)
-			}
-			return ext, nil
+		if finish == "length" {
+			continue
 		}
+		raw, err := parseJSON(content)
+		if err != nil {
+			return out, err
+		}
+		ext, err := interpret(raw, catalogo)
+		if err != nil {
+			return out, err
+		}
+		if transcrito {
+			ext.Correcciones = parseCorrections(raw["correcciones"])
+		}
+		if c.WebSearch {
+			c.enrichLocation(ctx, &ext, catalogo)
+		}
+		return ext, nil
 	}
 	return out, errors.New("la extracción con IA se cortó por longitud incluso con más tokens; intente con un PDF más corto")
+}
+
+func parseCorrections(v interface{}) []Correction {
+	list, ok := v.([]interface{})
+	if !ok {
+		return nil
+	}
+	var out []Correction
+	for _, item := range list {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		o, _ := m["original"].(string)
+		c, _ := m["correcto"].(string)
+		o, c = strings.TrimSpace(o), strings.TrimSpace(c)
+		if o == "" || c == "" || o == c || len([]rune(o)) > 120 || len([]rune(c)) > 120 {
+			continue
+		}
+		out = append(out, Correction{Original: o, Correcto: c})
+		if len(out) >= 10 {
+			break
+		}
+	}
+	return out
+}
+
+var (
+	reSpaces    = regexp.MustCompile(`[ \t\x{00A0}]+`)
+	reBlank     = regexp.MustCompile(`\n{3,}`)
+	reKeyClause = regexp.MustCompile(`(?i)vigen|duraci|t[eé]rmino|plazo|firma|facultad|escuela|unidad acad|representad|celebran|domicilio`)
+)
+
+// CompactText reduce espacios (que cuestan tokens sin aportar) y, si el texto
+// sigue siendo largo, conserva el inicio, el final y los párrafos con palabras
+// clave de vigencia, firma y facultad.
+func CompactText(texto string, limit int) string {
+	lines := strings.Split(strings.ReplaceAll(texto, "\r\n", "\n"), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimSpace(reSpaces.ReplaceAllString(l, " "))
+	}
+	texto = strings.TrimSpace(reBlank.ReplaceAllString(strings.Join(lines, "\n"), "\n\n"))
+	runes := []rune(texto)
+	if len(runes) <= limit {
+		return texto
+	}
+	head := string(runes[:headChars])
+	tail := string(runes[len(runes)-tailChars:])
+	middle := string(runes[headChars : len(runes)-tailChars])
+	var keep []string
+	used := 0
+	for _, p := range strings.Split(middle, "\n\n") {
+		p = strings.TrimSpace(p)
+		if p == "" || !reKeyClause.MatchString(p) {
+			continue
+		}
+		if r := []rune(p); len(r) > 1500 {
+			p = string(r[:1500]) + "…"
+		}
+		n := len([]rune(p))
+		if used+n > keywordsChars {
+			break
+		}
+		keep = append(keep, p)
+		used += n
+	}
+	parts := []string{head, "[…]"}
+	if len(keep) > 0 {
+		parts = append(parts, strings.Join(keep, "\n\n"), "[…]")
+	}
+	parts = append(parts, tail)
+	return strings.Join(parts, "\n\n")
 }
 
 const answerPrompt = `Eres un asistente documental de la Universidad Autónoma de Guerrero.
@@ -269,14 +460,15 @@ func (c *Client) Answer(ctx context.Context, question, contexto string) (string,
 	return "", errors.New("la respuesta se cortó por longitud; intenta una pregunta más específica")
 }
 
-const transcriptionPrompt = `Eres un transcriptor de documentos. La imagen es una página escaneada de un convenio de la Universidad Autónoma de Guerrero (UAGro), México.
-Transcribe de forma literal y completa todo el texto legible, en orden de lectura, conservando párrafos, títulos y la numeración de cláusulas.
+// transcriptionPrompt pide marcar las dudas con [?] para que la extracción
+// posterior pueda unificar nombres leídos de forma distinta en otras páginas.
+const transcriptionPrompt = `Transcribe la página escaneada de un convenio de la UAGro (México). Devuelve solo el texto en orden de lectura, sin comentarios ni bloques de código.
 Reglas:
-- No resumas, no traduzcas, no corrijas la ortografía y no agregues comentarios ni explicaciones.
-- Marca las palabras que no se puedan leer como [ilegible].
-- Indica firmas, sellos y logotipos brevemente entre corchetes, por ejemplo: [Firma], [Sello].
-- Si la página no contiene texto, responde exactamente: [Página sin texto]
-Responde únicamente con la transcripción en texto plano, sin bloques de código.`
+- Literal y completo: no resumas, no traduzcas ni corrijas ortografía. Conserva títulos, párrafos, numeración de cláusulas y acentos.
+- Nombres propios, cargos, cifras y fechas: léelos letra por letra y no los cambies por palabras o apellidos más comunes. Si dudas de una palabra, escribe tu mejor lectura seguida de [?], por ejemplo: Garay[?].
+- Ilegible: [ilegible]. Firmas y logotipos: solo [Firma] o [Logotipo], sin describirlos. Sellos: [Sello] o, si su texto se lee, [Sello: texto].
+- Tablas: una fila por línea con celdas separadas por " | ".
+- Página sin texto: responde exactamente [Página sin texto]`
 
 // TranscribeImage envía una página renderizada al modelo de visión y devuelve
 // el texto literal. La imagen debe venir en base64, sin el prefijo data:image/...
@@ -290,8 +482,7 @@ func (c *Client) TranscribeImage(ctx context.Context, imageBase64 string, page i
 	body := map[string]interface{}{
 		"model":            c.VisionModel,
 		"temperature":      0.0,
-		"max_tokens":       16000,
-		"reasoning_effort": "low",
+		"reasoning_effort": EffortLow,
 		"messages": []map[string]interface{}{
 			{"role": "system", "content": transcriptionPrompt},
 			{"role": "user", "content": []map[string]interface{}{
@@ -304,7 +495,9 @@ func (c *Client) TranscribeImage(ctx context.Context, imageBase64 string, page i
 	}
 	var content, finish string
 	var err error
-	for _, limit := range []int{16000, 32000} {
+	// Una página densa usa unos 6000 tokens entre razonamiento y texto; con
+	// 12000 casi nunca hace falta el segundo intento, que repite todo.
+	for _, limit := range []int{12000, 24000} {
 		body["max_tokens"] = limit
 		content, finish, err = c.chat(ctx, body)
 		if err != nil {
@@ -325,13 +518,19 @@ func (c *Client) TranscribeImage(ctx context.Context, imageBase64 string, page i
 	return "", errors.New("la transcripción se cortó por longitud incluso con más tokens; intente de nuevo")
 }
 
+// catalogText lista las etiquetas que el modelo puede usar. Las facultades no
+// se envían: el sistema crea su etiqueta a partir del campo "facultad".
 func catalogText(tags []Tag) string {
 	var b strings.Builder
-	b.WriteString("Etiquetas existentes (usa los nombres exactos):\n")
+	b.WriteString("Catálogo de etiquetas:\n")
 	groups := []struct{ tipo, titulo string }{
-		{"ambito", "Ámbito"}, {"estado", "Estado"}, {"ciudad", "Ciudad"}, {"facultad", "Facultad"}, {"tema", "Tema / Rubro"},
+		{"ambito", "Ámbito"}, {"estado", "Estado"}, {"ciudad", "Ciudad"}, {"tema", "Tema"},
 	}
 	for _, g := range groups {
+		if g.tipo == "ciudad" {
+			b.WriteString("- Ciudad (por estado): " + citiesByState(tags) + "\n")
+			continue
+		}
 		var names []string
 		for _, t := range tags {
 			if t.Tipo == g.tipo {
@@ -344,6 +543,34 @@ func catalogText(tags []Tag) string {
 		b.WriteString("- " + g.titulo + ": " + strings.Join(names, ", ") + "\n")
 	}
 	return b.String()
+}
+
+// citiesByState agrupa las ciudades del catálogo: "Guerrero: Acapulco de
+// Juárez, Ometepec; Puebla: Huauchinango".
+func citiesByState(tags []Tag) string {
+	var states []string
+	byState := map[string][]string{}
+	for _, t := range tags {
+		if t.Tipo != "ciudad" {
+			continue
+		}
+		st := t.Estado
+		if st == "" {
+			st = "sin estado"
+		}
+		if _, ok := byState[st]; !ok {
+			states = append(states, st)
+		}
+		byState[st] = append(byState[st], t.Nombre)
+	}
+	if len(states) == 0 {
+		return "(ninguna)"
+	}
+	parts := make([]string, 0, len(states))
+	for _, st := range states {
+		parts = append(parts, st+": "+strings.Join(byState[st], ", "))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func parseJSON(s string) (map[string]interface{}, error) {
@@ -371,6 +598,20 @@ func interpret(raw map[string]interface{}, catalogo []Tag) (Extraction, error) {
 		return ""
 	}
 	out.Dependencia = truncate(get("dependencia"), 500)
+	out.DependenciaCorta = truncate(get("dependencia_corta"), 60)
+	out.TipoDocumento = truncate(get("tipo_documento"), 80)
+	out.Domicilio = truncate(get("domicilio"), 200)
+	// Si el modelo no lo dice, se asume que es un convenio.
+	out.EsConvenio = true
+	if v, ok := raw["es_convenio"]; ok && v != nil {
+		out.EsConvenio = asBool(v)
+	}
+	if ren, ok := raw["renovacion"].(map[string]interface{}); ok {
+		out.Renovacion = asBool(ren["es"])
+		if v, ok := ren["fecha_anterior"].(string); ok {
+			out.FechaAnterior = parseDate(v)
+		}
+	}
 	out.FirmanteDependencia = truncate(get("firmante_dependencia"), 200)
 	out.CargoDependencia = truncate(get("cargo_dependencia"), 200)
 	out.FirmanteUAGro = truncate(get("firmante_uagro"), 200)
@@ -403,12 +644,17 @@ func interpret(raw map[string]interface{}, catalogo []Tag) (Extraction, error) {
 			notas = append(notas, "No se pudo leer la fecha exacta de vigencia.")
 		}
 	case "duracion":
-		if dur, ok := raw["vigencia_duracion"].(map[string]interface{}); ok && firma != "" && asBool(raw["vigencia_desde_firma"]) {
+		// El plazo cuenta desde la firma o desde una fecha de inicio explícita.
+		inicio := parseDate(get("vigencia_inicio"))
+		if v := strings.ToLower(get("vigencia_inicio")); v == "firma" || (v == "" && asBool(raw["vigencia_desde_firma"])) {
+			inicio = firma
+		}
+		if dur, ok := raw["vigencia_duracion"].(map[string]interface{}); ok && inicio != "" {
 			y := asInt(dur["anios"])
 			m := asInt(dur["meses"])
 			d := asInt(dur["dias"])
 			if y+m+d > 0 {
-				if t, err := time.Parse("2006-01-02", firma); err == nil {
+				if t, err := time.Parse("2006-01-02", inicio); err == nil {
 					end := t.AddDate(y, m, d)
 					if end.Year() >= 1950 && end.Year() <= 2100 {
 						out.FechaVigencia = end.Format("2006-01-02")
@@ -469,7 +715,8 @@ func validateSuggestions(v interface{}, catalogo []Tag) []Suggestion {
 			continue
 		}
 		tipo := aliasTipo[strings.ToLower(strings.TrimSpace(fmt.Sprint(m["tipo"])))]
-		if tipo == "" {
+		if tipo == "" || tipo == "facultad" {
+			// La etiqueta de facultad la decide el sistema con el campo "facultad".
 			continue
 		}
 		nombre := truncate(strings.TrimSpace(fmt.Sprint(m["nombre"])), 80)

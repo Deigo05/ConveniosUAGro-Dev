@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -31,8 +32,9 @@ func TestSeedAndEmptyState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tags) != 34 {
-		t.Fatalf("tags = %d, want 34", len(tags))
+	// 2 ámbitos, 32 estados y la facultad "Convenio Abierto".
+	if len(tags) != 35 {
+		t.Fatalf("tags = %d, want 35", len(tags))
 	}
 	stats, err := st.Stats()
 	if err != nil {
@@ -148,4 +150,18 @@ func TestSuggestionsAndProtection(t *testing.T) {
 			}
 		}
 	}
+}
+
+// sampleSeq evita nombres repetidos cuando el reloj tiene poca resolución.
+var sampleSeq int64
+
+func insertSample(t *testing.T, st *Store, texto string) int64 {
+	t.Helper()
+	sampleSeq++
+	name := fmt.Sprintf("%016x%016x.pdf", time.Now().UnixNano(), sampleSeq)
+	id, err := st.Insert(pdfutil.SavedFile{NombreGuardado: name, NombreOriginal: "muestra.pdf", Paginas: 1, Texto: texto, SHA256: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }

@@ -158,6 +158,6 @@ func rebuildText(tx *sql.Tx, id int64) error {
 		return err
 	}
 	texto := strings.Join(parts, "\n\n")
-	_, err = tx.Exec("UPDATE convenios SET texto=? WHERE id=?", texto, id)
+	_, err = tx.Exec("UPDATE convenios SET texto=?, huella=NULL WHERE id=?", texto, id)
 	return err
 }

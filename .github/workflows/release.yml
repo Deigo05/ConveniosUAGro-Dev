@@ -1,0 +1,76 @@
+# Compila la aplicación en cada push a main y publica el release v<VERSION>.
+# La aplicación consulta ese release para avisar de actualizaciones y
+# descargar el ejecutable nuevo. Si VERSION no cambia, el release de esa
+# versión se reemplaza con la compilación más reciente.
+name: Compilar y publicar
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 30
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Pruebas
+        run: go test ./...
+
+      - name: Instalar Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.0
+
+      - name: Compilar
+        shell: pwsh
+        run: |
+          $commit = (git rev-parse HEAD).Trim()
+          $date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          wails build -s -skipbindings -clean -platform windows/amd64 `
+            -ldflags "-X main.buildCommit=$commit -X main.buildDate=$date"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Publicar release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $tag = "v$version"
+          $commit = (git rev-parse HEAD).Trim()
+          $exe = "build/bin/ConveniosUAGro.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+          $zip = "ConveniosUAGro-$version-win64.zip"
+          Compress-Archive -Path $exe, LEEME.txt, README.md, CHANGELOG.md -DestinationPath $zip -Force
+
+          $changes = git log -15 --pretty=format:"- %s" | Where-Object { $_ -notmatch '^- merge:' }
+          $notes = @(
+            "Versión $version compilada desde main.",
+            "",
+            "Cambios recientes:",
+            ($changes -join "`n"),
+            "",
+            "commit: $commit",
+            "sha256: $hash"
+          ) -join "`n"
+          Set-Content -Path notes.md -Value $notes -Encoding utf8
+
+          # Se reemplaza el release de esta versión para que el tag apunte al
+          # commit compilado.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) { gh release delete $tag --yes --cleanup-tag }
+          gh release create $tag $exe $zip --title "Convenios UAGro $version" --notes-file notes.md --target $commit --latest
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

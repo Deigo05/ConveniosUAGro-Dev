@@ -35,6 +35,12 @@ func main() {
 			Assets:     assets,
 			Middleware: app.middleware,
 		},
+		// Permite arrastrar PDF, paquetes o respaldos a la ventana; la interfaz
+		// recibe las rutas con runtime.OnFileDrop.
+		DragAndDrop: &options.DragAndDrop{
+			EnableFileDrop:     true,
+			DisableWebViewDrop: true,
+		},
 		OnStartup:  app.startup,
 		OnShutdown: app.shutdown,
 		Bind: []interface{}{

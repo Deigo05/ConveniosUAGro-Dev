@@ -3,6 +3,13 @@ PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS convenios (
   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
   dependencia             TEXT NOT NULL DEFAULT '',
+  dependencia_corta       TEXT NOT NULL DEFAULT '',
+  tipo_documento          TEXT NOT NULL DEFAULT '',
+  huella                  INTEGER,
+  reemplazado_por         INTEGER REFERENCES convenios(id) ON DELETE SET NULL,
+  -- 0: normal; 1: la IA cree que el archivo no es un convenio; 2: el usuario
+  -- confirmó que sí lo es (la IA ya no lo vuelve a marcar).
+  no_es_convenio          INTEGER NOT NULL DEFAULT 0,
   firmante_dependencia    TEXT NOT NULL DEFAULT '',
   cargo_dependencia       TEXT NOT NULL DEFAULT '',
   firmante_uagro          TEXT NOT NULL DEFAULT '',
@@ -23,6 +30,7 @@ CREATE TABLE IF NOT EXISTS convenios (
   es_escaneado            INTEGER NOT NULL DEFAULT 0,
   texto_pdf               TEXT NOT NULL DEFAULT '',
   texto                   TEXT NOT NULL DEFAULT '',
+  busqueda                TEXT NOT NULL DEFAULT '',
   ia_estado               TEXT NOT NULL DEFAULT 'omitido'
                           CHECK (ia_estado IN ('omitido','pendiente','ok','parcial','error')),
   ia_error                TEXT NOT NULL DEFAULT '',
@@ -46,6 +54,9 @@ CREATE TABLE IF NOT EXISTS etiquetas (
   tipo      TEXT NOT NULL CHECK (tipo IN ('ambito','estado','ciudad','tema','facultad')),
   color     TEXT NOT NULL DEFAULT '#3A5A9C',
   protegida INTEGER NOT NULL DEFAULT 0,
+  -- Estado al que pertenece una etiqueta de ciudad; evita combinar, por
+  -- ejemplo, "Acapulco de Juárez" con "Veracruz".
+  estado    TEXT NOT NULL DEFAULT '',
   creada_en TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_etiquetas_tipo_nombre ON etiquetas(tipo, nombre);
@@ -57,6 +68,31 @@ CREATE TABLE IF NOT EXISTS convenio_etiquetas (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS ix_convenio_etiquetas_etiqueta ON convenio_etiquetas(etiqueta_id);
 
+-- Pares de convenios que parecen duplicados o renovaciones. Se recalculan con
+-- RefreshDuplicates; al borrar un convenio sus pares desaparecen solos.
+CREATE TABLE IF NOT EXISTS convenio_duplicados (
+  convenio_a INTEGER NOT NULL REFERENCES convenios(id) ON DELETE CASCADE,
+  convenio_b INTEGER NOT NULL REFERENCES convenios(id) ON DELETE CASCADE,
+  motivo     TEXT NOT NULL CHECK (motivo IN ('archivo', 'texto', 'datos', 'renovacion')),
+  PRIMARY KEY (convenio_a, convenio_b),
+  CHECK (convenio_a < convenio_b)
+);
+CREATE INDEX IF NOT EXISTS ix_convenio_duplicados_b ON convenio_duplicados(convenio_b);
+
+-- Pares que el usuario revisó y marcó como distintos: no se vuelven a sugerir.
+CREATE TABLE IF NOT EXISTS duplicados_descartados (
+  convenio_a INTEGER NOT NULL REFERENCES convenios(id) ON DELETE CASCADE,
+  convenio_b INTEGER NOT NULL REFERENCES convenios(id) ON DELETE CASCADE,
+  PRIMARY KEY (convenio_a, convenio_b),
+  CHECK (convenio_a < convenio_b)
+);
+
+-- Marcas de mantenimiento ya aplicadas (reparaciones que solo corren una vez).
+CREATE TABLE IF NOT EXISTS meta (
+  clave TEXT PRIMARY KEY,
+  valor TEXT NOT NULL DEFAULT ''
+) WITHOUT ROWID;
+
 -- Texto transcrito por página. Se conserva si el proceso se interrumpe.
 CREATE TABLE IF NOT EXISTS transcripcion_paginas (
   convenio_id INTEGER NOT NULL REFERENCES convenios(id) ON DELETE CASCADE,
@@ -65,31 +101,5 @@ CREATE TABLE IF NOT EXISTS transcripcion_paginas (
   PRIMARY KEY (convenio_id, pagina)
 ) WITHOUT ROWID;
 
--- Índice de búsqueda de texto completo. Se mantiene con los disparadores de abajo.
-CREATE VIRTUAL TABLE IF NOT EXISTS convenios_fts USING fts5(
-  dependencia,
-  archivo_nombre_original,
-  notas,
-  texto,
-  content='convenios',
-  content_rowid='id',
-  tokenize='unicode61 remove_diacritics 2'
-);
-
-CREATE TRIGGER IF NOT EXISTS convenios_ai AFTER INSERT ON convenios BEGIN
-  INSERT INTO convenios_fts(rowid, dependencia, archivo_nombre_original, notas, texto)
-  VALUES (new.id, new.dependencia, new.archivo_nombre_original, new.notas, new.texto);
-END;
-
-CREATE TRIGGER IF NOT EXISTS convenios_ad AFTER DELETE ON convenios BEGIN
-  INSERT INTO convenios_fts(convenios_fts, rowid, dependencia, archivo_nombre_original, notas, texto)
-  VALUES ('delete', old.id, old.dependencia, old.archivo_nombre_original, old.notas, old.texto);
-END;
-
-CREATE TRIGGER IF NOT EXISTS convenios_au
-AFTER UPDATE OF dependencia, archivo_nombre_original, notas, texto ON convenios BEGIN
-  INSERT INTO convenios_fts(convenios_fts, rowid, dependencia, archivo_nombre_original, notas, texto)
-  VALUES ('delete', old.id, old.dependencia, old.archivo_nombre_original, old.notas, old.texto);
-  INSERT INTO convenios_fts(rowid, dependencia, archivo_nombre_original, notas, texto)
-  VALUES (new.id, new.dependencia, new.archivo_nombre_original, new.notas, new.texto);
-END;
+-- El índice de búsqueda (convenios_fts) y sus disparadores están en search.sql;
+-- se crean después de las migraciones porque dependen de la columna busqueda.

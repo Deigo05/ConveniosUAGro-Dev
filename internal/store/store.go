@@ -10,14 +10,24 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
 
-//go:embed schema.sql
+//go:embed schema.sql search.sql
 var schemaFS embed.FS
 
-const schemaVersion = 5
+const schemaVersion = 6
+
+// busquedaExpr calcula la columna busqueda de una fila de convenios. Es la
+// misma expresión que usan los disparadores de search.sql.
+const busquedaExpr = `trim(
+	dependencia_corta || ' ' || tipo_documento || ' ' ||
+	firmante_dependencia || ' ' || cargo_dependencia || ' ' || firmante_uagro || ' ' ||
+	cargo_uagro || ' ' || facultad || ' ' || facultad_ciudad || ' ' || vigencia_texto || ' ' ||
+	coalesce((SELECT group_concat(e.nombre, ' ') FROM convenio_etiquetas ce
+	          JOIN etiquetas e ON e.id = ce.etiqueta_id WHERE ce.convenio_id = convenios.id), ''))`
 
 // Paths agrupa las rutas de datos de la aplicación.
 type Paths struct {
@@ -62,6 +72,8 @@ func DefaultPaths() (Paths, error) {
 type Store struct {
 	db    *sql.DB
 	paths Paths
+	// dupMu evita que dos recálculos de duplicados se mezclen.
+	dupMu sync.Mutex
 }
 
 // Open abre (o crea) la base de datos y aplica el esquema.
@@ -136,6 +148,31 @@ func Open(paths Paths) (*Store, error) {
 			db.Close()
 			return nil, err
 		}
+		version = 5
+	}
+	if version == 5 {
+		if err := migrateV6(db); err != nil {
+			db.Close()
+			return nil, err
+		}
+	} else if version == 6 {
+		if err := repairV6(db); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	search, err := schemaFS.ReadFile("search.sql")
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err := db.Exec(string(search)); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("no se pudo crear el índice de búsqueda: %w", err)
+	}
+	if err := ensureSearchIndex(db); err != nil {
+		db.Close()
+		return nil, err
 	}
 
 	st := &Store{db: db, paths: paths}
@@ -288,6 +325,157 @@ func migrateV5(db *sql.DB) error {
 	return tx.Commit()
 }
 
+// migrateV6 agrega las siglas y el tipo de documento (para el nombre del
+// archivo), la huella del texto y el historial de versiones, y reemplaza el índice FTS por uno que también busca en firmantes,
+// facultad y etiquetas. search.sql lo vuelve a crear y ensureSearchIndex lo llena.
+func migrateV6(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := addV6Columns(tx); err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		"DROP TRIGGER IF EXISTS convenios_ai",
+		"DROP TRIGGER IF EXISTS convenios_ad",
+		"DROP TRIGGER IF EXISTS convenios_au",
+		"DROP TABLE IF EXISTS convenios_fts",
+		"PRAGMA user_version=6",
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// v6Columns son las columnas que la versión 6 agregó a tablas existentes.
+var v6Columns = []struct{ table, name, def string }{
+	{"convenios", "busqueda", "TEXT NOT NULL DEFAULT ''"},
+	{"convenios", "dependencia_corta", "TEXT NOT NULL DEFAULT ''"},
+	{"convenios", "tipo_documento", "TEXT NOT NULL DEFAULT ''"},
+	{"convenios", "huella", "INTEGER"},
+	{"convenios", "reemplazado_por", "INTEGER REFERENCES convenios(id) ON DELETE SET NULL"},
+	{"convenios", "no_es_convenio", "INTEGER NOT NULL DEFAULT 0"},
+	{"etiquetas", "estado", "TEXT NOT NULL DEFAULT ''"},
+}
+
+// addV6Columns agrega las columnas de la versión 6 que falten y devuelve
+// cuáles agregó, como "tabla.columna".
+func addV6Columns(tx *sql.Tx) (map[string]bool, error) {
+	added := map[string]bool{}
+	existing := map[string]map[string]bool{}
+	for _, col := range v6Columns {
+		if existing[col.table] == nil {
+			cols, err := tableColumns(tx, col.table)
+			if err != nil {
+				return nil, err
+			}
+			existing[col.table] = cols
+		}
+		if existing[col.table][col.name] {
+			continue
+		}
+		if _, err := tx.Exec("ALTER TABLE " + col.table + " ADD COLUMN " + col.name + " " + col.def); err != nil {
+			return nil, err
+		}
+		added[col.table+"."+col.name] = true
+	}
+	return added, nil
+}
+
+// repairV6 completa una base marcada como versión 6 por una compilación de
+// prueba: quita los disparadores del índice antiguo y agrega las columnas que
+// falten. Si faltaba alguna, también rehace el índice de búsqueda.
+func repairV6(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// Disparadores del índice de la versión 5: con el índice actual cada
+	// alta fallaría (inserta dos veces la misma fila en convenios_fts).
+	for _, stmt := range []string{
+		"DROP TRIGGER IF EXISTS convenios_ai",
+		"DROP TRIGGER IF EXISTS convenios_ad",
+		"DROP TRIGGER IF EXISTS convenios_au",
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	added, err := addV6Columns(tx)
+	if err != nil {
+		return err
+	}
+	if !added["convenios.busqueda"] && !added["convenios.dependencia_corta"] && !added["convenios.tipo_documento"] {
+		// El índice de búsqueda no depende de las demás columnas.
+		return tx.Commit()
+	}
+	for _, stmt := range []string{
+		"DROP TRIGGER IF EXISTS convenios_busqueda_au",
+		"DROP TRIGGER IF EXISTS convenio_etiquetas_busqueda_ai",
+		"DROP TRIGGER IF EXISTS convenio_etiquetas_busqueda_ad",
+		"DROP TRIGGER IF EXISTS etiquetas_busqueda_au",
+		"DROP TRIGGER IF EXISTS convenios_fts_ai",
+		"DROP TRIGGER IF EXISTS convenios_fts_ad",
+		"DROP TRIGGER IF EXISTS convenios_fts_au",
+		"DROP TABLE IF EXISTS convenios_fts",
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func tableColumns(tx *sql.Tx, table string) (map[string]bool, error) {
+	rows, err := tx.Query("SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		cols[name] = true
+	}
+	return cols, rows.Err()
+}
+
+// ensureSearchIndex rellena el índice si no coincide con la tabla (después de
+// migrar o si se interrumpió una escritura).
+func ensureSearchIndex(db *sql.DB) error {
+	var convenios, indexados int
+	if err := db.QueryRow("SELECT count(*) FROM convenios").Scan(&convenios); err != nil {
+		return err
+	}
+	if err := db.QueryRow("SELECT count(*) FROM convenios_fts").Scan(&indexados); err != nil {
+		return err
+	}
+	if convenios == indexados {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("DELETE FROM convenios_fts"); err != nil {
+		return err
+	}
+	// Actualizar busqueda dispara convenios_fts_au, que vuelve a indexar la fila.
+	if _, err := tx.Exec("UPDATE convenios SET busqueda = " + busquedaExpr); err != nil {
+		return fmt.Errorf("no se pudo reconstruir el índice de búsqueda: %w", err)
+	}
+	return tx.Commit()
+}
+
 // Close cierra la base.
 func (s *Store) Close() error { return s.db.Close() }
 
@@ -308,7 +496,15 @@ const (
 	ColorCiudad   = "#2E7D32"
 	ColorFacultad = "#6A1B9A"
 	ColorTema     = "#3A5A9C"
+	ColorAbierto  = "#00796B"
 )
+
+// TagConvenioAbierto es la etiqueta de facultad para los convenios que no
+// nombran una facultad o unidad académica de la UAGro.
+const TagConvenioAbierto = "Convenio Abierto"
+
+// TagNacional es el ámbito de toda contraparte de México.
+const TagNacional = "Nacional"
 
 var estadosMx = []string{
 	"Aguascalientes", "Baja California", "Baja California Sur", "Campeche", "Chiapas",
@@ -335,6 +531,12 @@ func (s *Store) SeedTags() error {
 		); err != nil {
 			return err
 		}
+	}
+	if _, err := tx.Exec(
+		"INSERT OR IGNORE INTO etiquetas (nombre, tipo, color, protegida) VALUES (?, 'facultad', ?, 1)",
+		TagConvenioAbierto, ColorAbierto,
+	); err != nil {
+		return err
 	}
 	for _, estado := range estadosMx {
 		if _, err := tx.Exec(

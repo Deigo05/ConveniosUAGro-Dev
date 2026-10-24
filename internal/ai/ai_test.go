@@ -1,6 +1,9 @@
 package ai
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseSpanishDate(t *testing.T) {
 	cases := map[string]string{
@@ -74,5 +77,67 @@ func TestInterpret(t *testing.T) {
 	}
 	if got.Estado != "ok" {
 		t.Fatalf("estado = %s", got.Estado)
+	}
+}
+
+func TestInterpretDurationFromExplicitStart(t *testing.T) {
+	raw := map[string]interface{}{
+		"dependencia":       "Secretaría de Salud",
+		"fecha_firma":       "2024-03-15",
+		"vigencia_tipo":     "duracion",
+		"vigencia_duracion": map[string]interface{}{"anios": float64(2)},
+		"vigencia_inicio":   "2024-06-01",
+	}
+	got, err := interpret(raw, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FechaVigencia != "2026-06-01" || !got.VigenciaCalculada {
+		t.Fatalf("vigencia = %q calculada=%v", got.FechaVigencia, got.VigenciaCalculada)
+	}
+	raw["vigencia_inicio"] = "firma"
+	got, _ = interpret(raw, nil)
+	if got.FechaVigencia != "2026-03-15" {
+		t.Fatalf("vigencia desde firma = %q", got.FechaVigencia)
+	}
+}
+
+func TestFacultySuggestionsAreIgnored(t *testing.T) {
+	catalogo := []Tag{{Nombre: "Facultad de Turismo Acapulco", Tipo: "facultad"}, {Nombre: "Nacional", Tipo: "ambito"}}
+	got := validateSuggestions([]interface{}{
+		map[string]interface{}{"tipo": "facultad", "nombre": "Facultad de Turismo Acapulco"},
+		map[string]interface{}{"tipo": "ambito", "nombre": "Nacional"},
+	}, catalogo)
+	if len(got) != 1 || got[0].Tipo != "ambito" {
+		t.Fatalf("sugerencias = %+v", got)
+	}
+}
+
+func TestCompactTextKeepsKeyClauses(t *testing.T) {
+	if got := CompactText("  Hola   mundo \r\n\r\n\r\n\r\nfin  ", 1000); got != "Hola mundo\n\nfin" {
+		t.Fatalf("compactado = %q", got)
+	}
+	relleno := strings.Repeat("Texto de relleno sin datos relevantes. ", 600)
+	texto := "PROEMIO " + relleno + "\n\nDÉCIMA. VIGENCIA. El presente convenio tendrá una duración de tres años.\n\n" + relleno + "\n\nFIRMAS"
+	got := CompactText(texto, maxTextChars)
+	if n := len([]rune(got)); n > maxTextChars+keywordsChars {
+		t.Fatalf("texto demasiado largo: %d", n)
+	}
+	for _, want := range []string{"PROEMIO", "DÉCIMA. VIGENCIA", "FIRMAS"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("falta %q en el texto compactado", want)
+		}
+	}
+}
+
+func TestParseCorrections(t *testing.T) {
+	got := parseCorrections([]interface{}{
+		map[string]interface{}{"original": "Juan Ramón Garay", "correcto": "Juan Ramón García"},
+		map[string]interface{}{"original": "igual", "correcto": "igual"},
+		map[string]interface{}{"original": "", "correcto": "x"},
+		"basura",
+	})
+	if len(got) != 1 || got[0].Correcto != "Juan Ramón García" {
+		t.Fatalf("correcciones = %+v", got)
 	}
 }
