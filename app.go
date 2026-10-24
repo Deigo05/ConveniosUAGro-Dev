@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,7 +30,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.2.0"
+const appVersion = "1.2.1"
 
 // buildCommit y buildDate se fijan al compilar en GitHub Actions con
 // -ldflags "-X main.buildCommit=<sha> -X main.buildDate=<RFC3339>". En una
@@ -54,6 +55,11 @@ type App struct {
 	// tagMu ordena los cambios de etiquetas: con varios documentos
 	// procesándose a la vez, cada uno lee y reescribe sus etiquetas.
 	tagMu sync.Mutex
+
+	// doubts guarda, por convenio, las dudas de lectura de la última
+	// extracción hasta que la interfaz envía las imágenes para revisarlas.
+	doubtsMu sync.Mutex
+	doubts   map[int64][]ai.Doubt
 
 	updMu      sync.Mutex
 	lastUpdate *update.Info
@@ -480,6 +486,14 @@ func (a *App) SaveSettings(in config.SaveInput) (config.View, error) {
 
 // ExtractAI extrae los datos del PDF y guarda las sugerencias.
 func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
+	return a.extract(id, "", true)
+}
+
+// extract analiza el convenio con IA. nota se agrega a las notas (por
+// ejemplo, las correcciones confirmadas con la imagen) y keepDoubts guarda
+// las dudas de lectura para revisarlas después; la segunda extracción, tras
+// la revisión, ya no las guarda para no repetir el ciclo.
+func (a *App) extract(id int64, nota string, keepDoubts bool) (store.ConventionDetail, error) {
 	a.cfgMu.Lock()
 	cfg := a.cfg
 	a.cfgMu.Unlock()
@@ -511,6 +525,9 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 	client := ai.New(cfg.APIKey, cfg.BaseURL, cfg.Model, cfg.VisionModel)
 	client.WebSearch = cfg.WebSearchEnabled
 	client.Effort = cfg.AnalysisLevel
+	if d, err := a.store.Get(id); err == nil && len(d.CreadoEn) >= 10 {
+		client.ReferenceDate = d.CreadoEn[:10]
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 	res, err := client.Extract(ctx, texto, catalogo, transcrito)
@@ -518,7 +535,12 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 		_ = a.store.SetIAStatus(id, "error", err.Error())
 		return store.ConventionDetail{}, err
 	}
-	notaCorrecciones := ""
+	var dudas []ai.Doubt
+	if keepDoubts {
+		dudas = res.Dudas
+	}
+	a.setDoubts(id, dudas)
+	notaCorrecciones := nota
 	if len(res.Correcciones) > 0 {
 		pedidas := make([]store.NameCorrection, 0, len(res.Correcciones))
 		for _, c := range res.Correcciones {
@@ -531,7 +553,7 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 			for _, c := range applied {
 				cambios = append(cambios, fmt.Sprintf("«%s» → «%s»", c.Original, c.Correcto))
 			}
-			notaCorrecciones = "Transcripción: se unificaron nombres por posible error de lectura: " + strings.Join(cambios, "; ") + "."
+			notaCorrecciones = strings.TrimSpace(notaCorrecciones + " Transcripción: se unificaron nombres por posible error de lectura: " + strings.Join(cambios, "; ") + ".")
 		}
 	}
 	in := store.ConventionInput{
@@ -570,6 +592,127 @@ func (a *App) ExtractAI(id int64) (store.ConventionDetail, error) {
 		a.linkRenewal(id, res.FechaAnterior)
 	}
 	return a.store.Get(id)
+}
+
+func (a *App) setDoubts(id int64, dudas []ai.Doubt) {
+	a.doubtsMu.Lock()
+	defer a.doubtsMu.Unlock()
+	if len(dudas) == 0 {
+		delete(a.doubts, id)
+		return
+	}
+	if a.doubts == nil {
+		a.doubts = map[int64][]ai.Doubt{}
+	}
+	a.doubts[id] = dudas
+}
+
+func (a *App) takeDoubts(id int64) []ai.Doubt {
+	a.doubtsMu.Lock()
+	defer a.doubtsMu.Unlock()
+	d := a.doubts[id]
+	delete(a.doubts, id)
+	return d
+}
+
+// PagesToVerify devuelve las páginas transcritas donde la última extracción
+// encontró lecturas contradictorias (como máximo 3). La interfaz las vuelve
+// a renderizar con más resolución y las envía a VerifyAI.
+func (a *App) PagesToVerify(id int64) []int {
+	a.doubtsMu.Lock()
+	dudas := a.doubts[id]
+	a.doubtsMu.Unlock()
+	seen := map[int]bool{}
+	pages := []int{}
+	for _, d := range dudas {
+		for _, p := range d.Paginas {
+			if seen[p] || len(pages) >= 3 {
+				continue
+			}
+			if _, err := a.store.TranscriptionPage(id, p); err != nil {
+				continue // la página tiene texto nativo o no existe
+			}
+			seen[p] = true
+			pages = append(pages, p)
+		}
+	}
+	sort.Ints(pages)
+	return pages
+}
+
+// PageImage es una página renderizada por la interfaz (JPEG en base64).
+type PageImage struct {
+	Pagina int    `json:"pagina"`
+	Imagen string `json:"imagen"`
+}
+
+// VerifyAI revisa con la imagen las dudas de lectura de la última extracción.
+// Si la imagen confirma la lectura correcta, corrige la transcripción y vuelve
+// a extraer los datos con el texto ya corregido.
+func (a *App) VerifyAI(id int64, pages []PageImage) (store.ConventionDetail, error) {
+	dudas := a.takeDoubts(id)
+	if len(dudas) == 0 || len(pages) == 0 {
+		return a.store.Get(id)
+	}
+	a.cfgMu.Lock()
+	cfg := a.cfg
+	a.cfgMu.Unlock()
+	if !cfg.AIEnabled || cfg.APIKey == "" {
+		return store.ConventionDetail{}, errors.New("configure y active la IA antes de revisar")
+	}
+	client := ai.New(cfg.APIKey, cfg.BaseURL, cfg.Model, cfg.VisionModel)
+	var (
+		mu      sync.Mutex
+		wg      sync.WaitGroup
+		cambios []string
+	)
+	for _, p := range pages {
+		var suyas []ai.Doubt
+		for _, d := range dudas {
+			for _, n := range d.Paginas {
+				if n == p.Pagina {
+					suyas = append(suyas, d)
+					break
+				}
+			}
+		}
+		texto, err := a.store.TranscriptionPage(id, p.Pagina)
+		if err != nil || len(suyas) == 0 {
+			continue
+		}
+		wg.Add(1)
+		go func(p PageImage, texto string, suyas []ai.Doubt) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
+			defer cancel()
+			cors, err := client.VerifyPage(ctx, p.Imagen, p.Pagina, texto, suyas)
+			if err != nil {
+				log.Printf("no se pudo revisar la página %d del convenio %d: %v", p.Pagina, id, err)
+				return
+			}
+			pedidas := make([]store.NameCorrection, 0, len(cors))
+			for _, c := range cors {
+				pedidas = append(pedidas, store.NameCorrection{Original: c.Original, Correcto: c.Correcto})
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			applied, err := a.store.ApplyPageCorrections(id, p.Pagina, pedidas)
+			if err != nil {
+				log.Printf("no se pudo corregir la página %d del convenio %d: %v", p.Pagina, id, err)
+				return
+			}
+			for _, c := range applied {
+				cambios = append(cambios, fmt.Sprintf("«%s» → «%s» (página %d)", c.Original, c.Correcto, p.Pagina))
+			}
+		}(p, texto, suyas)
+	}
+	wg.Wait()
+	if len(cambios) == 0 {
+		return a.store.Get(id)
+	}
+	sort.Strings(cambios)
+	nota := "Verificado con la imagen: " + strings.Join(cambios, "; ") + "."
+	return a.extract(id, nota, false)
 }
 
 // applyAITags aplica las etiquetas sugeridas (no hay paso de aprobación) y

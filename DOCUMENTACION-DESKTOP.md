@@ -1,6 +1,6 @@
 # Convenios UAGro Desktop — Documentación técnica
 
-**Versión:** 1.2.0  
+**Versión:** 1.2.1  
 **Estado:** aplicación Windows compilada, probada y entregada en la PC.  
 **Base inicial:** vacía (se crean solo las etiquetas base al primer arranque).
 
@@ -221,11 +221,14 @@ Los estilos están en `styles.css`; no hay dependencias externas ni CDN. PDF.js 
 - `CompactText` reduce espacios y conserva inicio, párrafos con palabras clave y final (máx. 32 000 caracteres).
 - El prompt pide `renovacion: {es, fecha_anterior}`; si el documento declara que renueva a otro, `linkRenewal` une la versión con el candidato de renovación más antiguo que coincide (o el de esa fecha).
 - Con texto transcrito el prompt pide `correcciones` de nombres; `store.ApplyNameCorrections` solo las aplica si ambos nombres tienen dos o más palabras, se parecen (≥0.6) y la forma correcta aparece en el texto.
+- El mensaje de usuario empieza con la fecha de registro (`Client.ReferenceDate`, de `creado_en`); queda fuera del prompt de sistema para no romper la caché. `checkSignatureDate` agrega una nota si `fecha_firma` es posterior.
+- Reglas de escaneados: firmantes del bloque final comparados con proemio y declaraciones (misma parte y cargo ⇒ misma persona, se prefiere la forma del proemio); `[Tachado: …]` no vale; si cierre y anotación de firmas difieren, gana la anotación con nota. `lugar_firma` alimenta `locationQuery` cuando falta el domicilio.
+- **Dudas de lectura**: con texto transcrito el prompt pide `dudas` (máx. 3: páginas, dato y lecturas). `App.extract` las guarda en memoria; la interfaz llama a `PagesToVerify` (máx. 3 páginas transcritas), renderiza esas páginas a 2400 px (`renderPageJPEG`, escala ≤2.2, calidad 0.9) y llama a `VerifyAI`. `Client.VerifyPage` manda imagen, transcripción de la página y dudas al modelo de visión (`low`, JSON); `relevantCorrections` descarta lo que no comparte palabras con las lecturas dudosas y `store.ApplyPageCorrections` reemplaza solo en esa página (original de ≤12 palabras presente en la página, reemplazo de ≤160 caracteres). Si hubo cambios, se vuelve a extraer una vez (sin guardar dudas) con la nota «Verificado con la imagen: …».
 
 ### Transcripción
 
 - `TranscribeImage` usa el **modelo de visión** configurado (`vision_model`), no el modelo de texto.
-- El prompt pide transcripción literal, sin resumen, nombres letra por letra, `[?]` en letras dudosas y marcas `[ilegible]`, `[Firma]`, `[Sello: texto]`.
+- El prompt pide transcripción literal, sin resumen, nombres letra por letra, `[?]` en letras dudosas y marcas `[ilegible]`, `[Firma]`, `[Sello: texto]`, `[Tachado: texto]` y `[Manuscrito: texto]`.
 - La imagen se envía como JPEG base64 en `image_url`.
 - Si el modelo no acepta imágenes, se muestra un error que pide revisar el modelo de visión.
 - El texto se guarda por página; cada guardado reconstruye `convenios.texto` con `texto_pdf` + `[Página N]` y actualiza FTS5.
@@ -296,6 +299,7 @@ Cubierto:
 - Petición de visión: modelo, autorización y `image_url` con JPEG base64.
 - Migración v1→v6 y v5→v6, búsqueda por firmantes/etiquetas, aproximada y fragmentos.
 - Convenio Abierto, unificación de nombres, copia de análisis de duplicados.
+- Revisión de dudas con la imagen (`TestVerifyDoubtsWithImage`): corrige solo la página dudosa, vuelve a extraer y no repite el ciclo; `ApplyPageCorrections`, `parseDoubts`, `relevantCorrections`, fecha de firma posterior al registro y lugar de firma en la búsqueda de ubicación.
 - Exportar/importar paquete y respaldo, CSV.
 - Actualizaciones: comparación de versiones, release nuevo/igual, descarga con verificación e instalación.
 

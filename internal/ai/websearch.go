@@ -139,6 +139,8 @@ func cleanHTML(s string) string {
 
 // locationQuery arma la búsqueda con el nombre (las siglas si el nombre es
 // muy largo) y el domicilio del documento: "C.B.T.i.s. No. 86 Huauchinango".
+// Sin domicilio usa el lugar de firma, que evita confundir a la contraparte
+// con otra del mismo nombre en otro estado.
 func locationQuery(ext *Extraction) string {
 	name := strings.TrimSpace(strings.Split(ext.Dependencia, ";")[0])
 	if short := strings.TrimSpace(ext.DependenciaCorta); short != "" && len([]rune(name)) > 70 {
@@ -150,6 +152,9 @@ func locationQuery(ext *Extraction) string {
 	dom := strings.Join(strings.Fields(reDoubt.ReplaceAllString(ext.Domicilio, " ")), " ")
 	if dom != "" {
 		return truncate(name+" "+dom, 220)
+	}
+	if lugar := strings.TrimSpace(ext.LugarFirma); lugar != "" {
+		return truncate(name+" "+lugar, 220)
 	}
 	return name + " dirección ciudad estado México"
 }
@@ -188,12 +193,15 @@ func (c *Client) enrichLocation(ctx context.Context, ext *Extraction, catalogo [
 	if domicilio == "" {
 		domicilio = "(no consta)"
 	}
+	if ext.LugarFirma != "" {
+		domicilio += "\nLugar de firma (solo una pista; la contraparte puede estar en otro lugar): " + ext.LugarFirma
+	}
 	prompt := fmt.Sprintf(`Contraparte: %s
 Domicilio en el documento (puede traer errores de lectura): %s
 Resultados web:
 %s
 
-Devuelve {"etiquetas":[{"tipo":"ambito"|"estado"|"ciudad","nombre":s}]} con la ubicación de la contraparte (nunca la de la UAGro): máximo una de cada tipo, nombres exactos del catálogo. La ciudad es el municipio con su nombre oficial y acentos, debe pertenecer al estado y puede ser nueva. Si los resultados y el domicilio no la confirman, devuelve {"etiquetas":[]}.
+Devuelve {"etiquetas":[{"tipo":"ambito"|"estado"|"ciudad","nombre":s}]} con la ubicación de la contraparte (nunca la de la UAGro): máximo una de cada tipo, nombres exactos del catálogo. La ciudad es el municipio con su nombre oficial y acentos, debe pertenecer al estado y puede ser nueva. Si los resultados no la confirman, o hablan de otra entidad con el mismo nombre, devuelve {"etiquetas":[]}.
 %s`, ext.Dependencia, domicilio, results, locationCatalog(catalogo))
 	body := map[string]interface{}{
 		"model":            c.Model,

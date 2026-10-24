@@ -43,7 +43,7 @@ No hay que instalar un servidor ni iniciar sesión. Todo funciona en la PC.
 - **Historial de versiones**: un convenio renovado deja al anterior en su historial y la lista muestra solo la versión más reciente.
 - Etiqueta **Convenio Abierto** para convenios que no especifican la facultad de la UAGro. Todo convenio analizado lleva su facultad (o Convenio Abierto) y su ámbito.
 - Marca **«¿No es convenio?»** para archivos que la IA identifica como otro tipo de documento (actas, oficios, constancias), con su filtro en la lista.
-- Unificación de nombres con posibles errores de lectura en la transcripción.
+- Unificación de nombres con posibles errores de lectura en la transcripción y **revisión con la imagen** de los datos que el texto leyó de dos formas (firmantes, fechas).
 - **Aviso de actualizaciones** desde GitHub con instalación en un clic.
 - Análisis opcional con IA para extraer dependencia, fechas y etiquetas desde PDF con texto.
 - Filtro para clasificar los convenios que aún no tienen etiquetas.

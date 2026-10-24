@@ -141,3 +141,55 @@ func TestParseCorrections(t *testing.T) {
 		t.Fatalf("correcciones = %+v", got)
 	}
 }
+
+func TestParseDoubts(t *testing.T) {
+	got := parseDoubts([]interface{}{
+		map[string]interface{}{"paginas": []interface{}{3.0, 4.0}, "dato": "fecha de firma", "lecturas": []interface{}{"4 de noviembre", "04 de septiembre"}},
+		map[string]interface{}{"paginas": []interface{}{}, "dato": "sin página"},
+		map[string]interface{}{"paginas": []interface{}{2.0}, "dato": nil},
+		"basura",
+	})
+	if len(got) != 1 || len(got[0].Paginas) != 2 || got[0].Paginas[0] != 3 || len(got[0].Lecturas) != 2 {
+		t.Fatalf("dudas = %+v", got)
+	}
+}
+
+// Nadie sube un convenio antes de firmarlo: una firma posterior al registro
+// es un error de lectura y se avisa en las notas.
+func TestSignatureAfterRegistrationIsFlagged(t *testing.T) {
+	c := &Client{ReferenceDate: "2026-10-24"}
+	ext := Extraction{FechaFirma: "2026-11-04"}
+	c.checkSignatureDate(&ext)
+	if !strings.Contains(ext.Notas, "04/11/2026") {
+		t.Fatalf("notas = %q", ext.Notas)
+	}
+	ok := Extraction{FechaFirma: "2026-09-04"}
+	c.checkSignatureDate(&ok)
+	if ok.Notas != "" {
+		t.Fatalf("una fecha anterior no lleva nota: %q", ok.Notas)
+	}
+}
+
+func TestLocationQueryUsesSigningPlace(t *testing.T) {
+	q := locationQuery(&Extraction{Dependencia: "Jardín de Eventos Lúa", LugarFirma: "Acapulco de Juárez, Guerrero"})
+	if q != "Jardín de Eventos Lúa Acapulco de Juárez, Guerrero" {
+		t.Fatalf("consulta = %q", q)
+	}
+}
+
+// La revisión con la imagen solo puede tocar lo que estaba en duda.
+func TestRelevantCorrections(t *testing.T) {
+	dudas := []Doubt{
+		{Paginas: []int{3}, Dato: "firmante", Lecturas: []string{"Jacqueline Cerón Falcón (propietaria)", "Joaquín Zorro Falcón (propietario)"}},
+		{Paginas: []int{3, 4}, Dato: "fecha de firma", Lecturas: []string{"4 de noviembre de 2026", "04 de septiembre de 2026"}},
+	}
+	got := relevantCorrections([]Correction{
+		{Original: "Dr. Joaquín Zorro Falcón", Correcto: "Dra. Jacqueline Cerón Falcón"},
+		{Original: "4 días del mes de noviembre del año dos mil veintiséis", Correcto: "[Tachado: 4 días del mes de noviembre del año dos mil veinticinco]"},
+		{Original: "del acuerdo Modificatoria", Correcto: "del acuerdo Modificatorio"},
+		{Original: "respetar las condición que", Correcto: "respetar la condición que"},
+	}, dudas)
+	if len(got) != 2 {
+		t.Fatalf("correcciones = %+v", got)
+	}
+}

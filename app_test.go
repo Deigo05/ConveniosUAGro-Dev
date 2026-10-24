@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -410,5 +411,112 @@ func TestExtractRequiredTagsAndNoConvenio(t *testing.T) {
 	}
 	if got["ambito"] != "Nacional" || got["facultad"] != "Convenio Abierto" {
 		t.Fatalf("etiquetas tras confirmar = %v", got)
+	}
+}
+
+// chatReply arma la respuesta de un servicio compatible con OpenAI cuyo
+// contenido es el JSON v.
+func chatReply(t *testing.T, w http.ResponseWriter, v interface{}) {
+	t.Helper()
+	content, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, _ := json.Marshal(map[string]interface{}{
+		"choices": []map[string]interface{}{{"message": map[string]string{"content": string(content)}, "finish_reason": "stop"}},
+	})
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(reply)
+}
+
+// Un nombre tapado por la firma se lee muy distinto al del proemio: la
+// extracción lo deja como duda, la imagen confirma la lectura correcta, se
+// corrige la transcripción y los datos se vuelven a extraer sin la nota.
+func TestVerifyDoubtsWithImage(t *testing.T) {
+	var verifications, extractions int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		req := string(body)
+		if strings.Contains(req, "Verificas la lectura") {
+			verifications++
+			if !strings.Contains(req, "data:image/jpeg;base64,") || !strings.Contains(req, "Joaquín Zorro Falcón") {
+				t.Errorf("la verificación no recibió la imagen o la duda: %s", req)
+			}
+			chatReply(t, w, map[string]interface{}{"correcciones": []map[string]string{{"original": "Joaquín Zorro Falcón", "correcto": "Jacqueline Cerón Falcón"}}})
+			return
+		}
+		extractions++
+		if !strings.Contains(req, "Fecha de registro del documento: ") {
+			t.Errorf("la extracción no recibió la fecha de registro")
+		}
+		out := map[string]interface{}{
+			"es_convenio": true, "dependencia": "Jardín de Eventos Lúa",
+			"firmante_dependencia": "Jacqueline Cerón Falcón", "cargo_dependencia": "Propietaria",
+			"fecha_firma": "2026-09-04", "vigencia_tipo": "fecha_exacta", "fecha_vigencia": "2027-02-14",
+			"etiquetas": []map[string]string{{"tipo": "ambito", "nombre": "Nacional"}},
+		}
+		if strings.Contains(req, "Zorro") {
+			out["dudas"] = []map[string]interface{}{{"paginas": []int{2}, "dato": "nombre de quien firma por Jardín de Eventos Lúa", "lecturas": []string{"Jacqueline Cerón Falcón", "Joaquín Zorro Falcón"}}}
+			out["notas"] = "El representante difiere entre el proemio y la firma."
+		}
+		chatReply(t, w, out)
+	}))
+	defer srv.Close()
+	t.Setenv("CONVENIOS_DATA_DIR", t.TempDir())
+	paths, err := store.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	id, err := st.Insert(pdfutil.SavedFile{NombreGuardado: "abcdefabcdefabcdefabcdefabcdef14.pdf", NombreOriginal: "x.pdf", Paginas: 2, PaginasSinTexto: 2, Escaneado: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BeginTranscription(id, 2); err != nil {
+		t.Fatal(err)
+	}
+	pages := map[int]string{
+		1: "ACUERDO QUE CELEBRAN LA UAGro Y JARDÍN DE EVENTOS LUA, REPRESENTADO POR LA DRA. JACQUELINE CERÓN FALCÓN, PROPIETARIA.",
+		2: "POR \"JARDIN DE EVENTOS LUA\"\n[Firma]\nDr. Joaquín Zorro Falcón\nPropietario",
+	}
+	for p := 1; p <= 2; p++ {
+		if _, err := st.SaveTranscriptionPage(id, p, pages[p]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.FinishTranscription(id); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{store: st, paths: paths, cfg: config.Config{AIEnabled: true, APIKey: "k", BaseURL: srv.URL, Model: "m", VisionModel: "v"}}
+
+	if _, err := a.ExtractAI(id); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.PagesToVerify(id); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("páginas por revisar = %v", got)
+	}
+	res, err := a.VerifyAI(id, []PageImage{{Pagina: 2, Imagen: "aW1hZ2Vu"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verifications != 1 || extractions != 2 {
+		t.Fatalf("verificaciones = %d, extracciones = %d", verifications, extractions)
+	}
+	page2, _ := st.TranscriptionPage(id, 2)
+	if strings.Contains(page2, "Zorro") || !strings.Contains(page2, "Jacqueline Cerón Falcón") {
+		t.Fatalf("la transcripción no se corrigió: %q", page2)
+	}
+	if res.FirmanteDependencia != "Jacqueline Cerón Falcón" || res.FechaFirma != "2026-09-04" {
+		t.Fatalf("ficha = %+v", res.ConventionSummary)
+	}
+	if strings.Contains(res.Notas, "difiere") || !strings.Contains(res.Notas, "Verificado con la imagen") {
+		t.Fatalf("notas = %q", res.Notas)
+	}
+	if got := a.PagesToVerify(id); len(got) != 0 {
+		t.Fatalf("las dudas debían quedar resueltas: %v", got)
 	}
 }

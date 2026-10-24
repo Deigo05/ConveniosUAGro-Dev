@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.1] - 2026-10-24
+
+### Agregado
+
+- **Revisión de dudas con la imagen**: cuando la IA encuentra un dato leído de dos formas en un escaneado (por ejemplo, un firmante con un nombre en el proemio y otro en la firma, o dos fechas de firma), la app vuelve a renderizar esas páginas con más resolución (hasta 3), le pregunta al modelo de visión solo por esos fragmentos, corrige la transcripción si la imagen lo confirma y vuelve a extraer los datos. La ficha deja nota de lo que se verificó. Solo ocurre en documentos con dudas (unos 30 a 50 s más).
+- La transcripción marca el texto tachado (`[Tachado: …]`) y las anotaciones a mano (`[Manuscrito: …]`), y lee con más cuidado los nombres impresos bajo firmas y sellos.
+- La búsqueda web de ubicación usa el lugar de firma como pista cuando el documento no trae el domicilio de la contraparte.
+
+### Cambiado
+
+- Instrucciones de extracción más precisas para escaneados:
+  - Los firmantes se comparan entre el bloque de firmas y el proemio o las declaraciones. Si la misma parte aparece con dos nombres en el mismo cargo, se trata como error de lectura y se usa la forma del proemio, aunque cambien muchas letras.
+  - La fecha de firma nunca puede ser posterior al registro del documento; si lo es, la ficha lo advierte.
+  - Lo tachado no cuenta.
+  - Si el cierre y la anotación de firmas («las firmas que anteceden corresponden…») no coinciden, se usa la de la anotación y se deja nota.
+- Las notas de la IA son de una sola frase con lo que hay que revisar en el documento. Ya no mencionan datos secundarios faltantes (domicilio, siglas, testigos) ni errores de lectura ya corregidos.
+
 ## [1.2.0] - 2026-10-24
 
 ### Agregado

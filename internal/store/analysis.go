@@ -107,6 +107,55 @@ func (s *Store) ApplyNameCorrections(id int64, corrections []NameCorrection) ([]
 	return applied, tx.Commit()
 }
 
+// TranscriptionPage devuelve el texto transcrito de una página.
+func (s *Store) TranscriptionPage(id int64, page int) (string, error) {
+	var t string
+	err := s.db.QueryRow("SELECT texto FROM transcripcion_paginas WHERE convenio_id=? AND pagina=?", id, page).Scan(&t)
+	return t, err
+}
+
+// ApplyPageCorrections aplica en una página las correcciones que el modelo
+// confirmó al mirar su imagen. A diferencia de ApplyNameCorrections no exige
+// que las variantes se parezcan (un nombre tapado por una firma puede leerse
+// muy distinto), pero el fragmento original debe estar en esa página y ser
+// corto, para que nunca se reescriba un párrafo.
+func (s *Store) ApplyPageCorrections(id int64, page int, corrections []NameCorrection) ([]NameCorrection, error) {
+	text, err := s.TranscriptionPage(id, page)
+	if err != nil {
+		return nil, err
+	}
+	var applied []NameCorrection
+	for _, c := range corrections {
+		orig := cleanName(c.Original)
+		good := cleanName(c.Correcto)
+		ow, gw := len(strings.Fields(orig)), len(strings.Fields(good))
+		if orig == "" || good == "" || strings.EqualFold(orig, good) || ow > 12 || gw > ow+4 || len([]rune(good)) > 160 {
+			continue
+		}
+		out, n := replaceName(text, namePattern(orig), good)
+		if n == 0 {
+			continue
+		}
+		text = out
+		applied = append(applied, NameCorrection{Original: orig, Correcto: good, Cambios: n})
+	}
+	if len(applied) == 0 {
+		return nil, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec("UPDATE transcripcion_paginas SET texto=? WHERE convenio_id=? AND pagina=?", text, id, page); err != nil {
+		return nil, err
+	}
+	if err := rebuildText(tx, id); err != nil {
+		return nil, err
+	}
+	return applied, tx.Commit()
+}
+
 func cleanName(s string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "[?]", " ")), " ")
 }
