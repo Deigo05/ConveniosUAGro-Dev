@@ -1,6 +1,6 @@
 # Convenios UAGro Desktop — Documentación técnica
 
-**Versión:** 1.1.2  
+**Versión:** 1.2.0  
 **Estado:** aplicación Windows compilada, probada y entregada en la PC.  
 **Base inicial:** vacía (se crean solo las etiquetas base al primer arranque).
 
@@ -85,11 +85,21 @@ La variable `CONVENIOS_DATA_DIR` permite usar otra carpeta (pruebas). El ejecuta
 ### Esquema
 
 - `convenios`: datos, archivo, `texto_pdf` original, `texto` final, estado IA, sugerencias, clasificación, estado de transcripción y fechas.
-- `etiquetas`: `ambito`, `estado`, `ciudad`, `facultad`, `tema`; `protegida` para las base. `convenios.facultad_ciudad` guarda la sede de la facultad, separada de la ciudad de la dependencia.
+- `etiquetas`: `ambito`, `estado`, `ciudad`, `facultad`, `tema`; `protegida` para las base. `etiquetas.estado` guarda el estado de cada ciudad. `convenios.facultad_ciudad` guarda la sede de la facultad, separada de la ciudad de la dependencia.
+- `convenios.no_es_convenio`: 0 normal, 1 la IA (o el usuario) lo marcó como «no es convenio», 2 el usuario confirmó que sí lo es; `SetAIConvenioFlag` nunca cambia un 2.
+- `meta(clave, valor)`: marcas de reparaciones que se ejecutan una sola vez (por ejemplo `reparacion_etiquetas_obligatorias`).
 - `convenio_etiquetas`: N:M con cascada.
 - `transcripcion_paginas`: texto por página, PK `(convenio_id, pagina)`.
-- `convenios_fts`: FTS5 sobre dependencia, archivo, notas y texto, con triggers.
-- `PRAGMA user_version = 5`. Las migraciones agregan transcripción, firmantes/facultad, tipo `facultad` y `facultad_ciudad`.
+- `convenios.dependencia_corta` (siglas) y `convenios.tipo_documento` (catálogo `store.TiposDocumento`): los extrae la IA, se editan en la ficha y forman el nombre de descarga.
+- `convenios.huella`: SimHash de 64 bits del texto (grupos de 3 palabras); `NULL` cuando el texto cambió y falta recalcularla, 0 si hay menos de 80 palabras.
+- `convenios.reemplazado_por`: id de la versión que renueva a esta (`ON DELETE SET NULL`). La versión vigente tiene `NULL`; el listado y las estadísticas solo cuentan vigentes salvo `incluir_anteriores`.
+- `convenio_duplicados(convenio_a < convenio_b, motivo)`: pares por revisar con motivo `archivo` (mismo SHA-256), `texto` (huellas a ≤8 bits y contraparte compatible), `datos` (misma contraparte, fecha, tipo y facultad) o `renovacion` (misma contraparte, tipo y facultad con otra fecha; solo entre vigentes y solo con el anterior más reciente). `ON DELETE CASCADE`: al borrar uno, la marca del otro desaparece. `store.RefreshDuplicates` recalcula todo en memoria después de cada cambio (importar, guardar, etiquetas, IA, transcripción, borrar) y al arrancar.
+- `duplicados_descartados`: pares que el usuario marcó como distintos; no se vuelven a proponer.
+- `convenios.busqueda`: firmantes, cargos, facultad, sede, vigencia y nombres de etiquetas, mantenida por triggers.
+- `convenios_fts` (definido en `search.sql`, se crea después de las migraciones): FTS5 propio sobre dependencia, archivo, notas, texto y `busqueda`. Los triggers borran por `rowid` e insertan la fila actual; `ensureSearchIndex` lo reconstruye si el conteo no coincide.
+- `PRAGMA user_version = 6`. Las migraciones agregan transcripción, firmantes/facultad, tipo `facultad`, `facultad_ciudad` y (v6) `busqueda` con el índice nuevo.
+
+Búsqueda: términos con prefijo y frases entre comillas (AND); si no hay resultados se repite con OR y se marca `aproximado`. El orden `relevancia` usa `bm25` y cada fila trae un `fragmento` con la coincidencia entre los caracteres 0x02/0x03.
 
 Las etiquetas base son:
 
@@ -97,6 +107,17 @@ Las etiquetas base son:
 - 32 estados de México.
 - Se insertan con `INSERT OR IGNORE` en cada arranque.
 - No se pueden editar ni borrar.
+- Además se crea la etiqueta protegida de facultad **Convenio Abierto** (`#00796B`). `store.MarkOpenAgreement` la asigna a convenios analizados o clasificados sin facultad ni otra etiqueta de facultad; `UnmarkOpenAgreement` la retira cuando se captura una facultad.
+
+Reglas de ubicación (`consistentTags`, en `tags.go`):
+
+- Una ciudad con estado agrega ese estado; un estado de México agrega «Nacional».
+- `ReplaceTags` (cambios del usuario) rechaza con `TagConflictError` una ciudad con el estado de otra o un estado con «Internacional». `ReplaceTagsAuto` (IA y reparaciones) corrige en vez de rechazar: gana el estado de la ciudad.
+- Una ciudad sin estado (de versiones anteriores) adopta el estado con el que se guarda; `BackfillCityStates` asigna al arrancar el estado más usado por sus convenios.
+- `AcceptSuggestions` busca la ciudad con `findCity`: prefiere la del mismo estado y, si no existe, la crea con el estado sugerido.
+- `EnsureAmbito` agrega «Nacional» cuando un convenio analizado no tiene ámbito; `applyAITags` lo aplica junto con la facultad salvo en archivos marcados como «no es convenio».
+
+Catálogo de facultades (`internal/uagro`): cada unidad tiene nombre oficial, sede, alias y si es la sede principal. `Resolve` quita prefijos («Unidad Académica de», «Escuela Superior de», «UA»), siglas (EMVZ, FCA…) y sufijos («de la UAGro»), conserva el número y elige la sede: la que coincide con la ciudad, la única que existe o la principal. Las unidades no catalogadas se aceptan con su nombre normalizado; «Rectoría» y otras áreas administrativas devuelven `ok=false` y el convenio queda como «Convenio Abierto».
 
 ### Vigencias
 
@@ -111,6 +132,7 @@ Las etiquetas base son:
 Filtros del listado:
 
 - `vigentes`: fecha futura/hoy o indefinida.
+- `por_vencer`: vence en 90 días o menos.
 - `no_vigentes`: solo vencidos.
 - `sin_fecha`: sin fecha e no indefinida.
 
@@ -126,11 +148,13 @@ El frontend llama `window.go.main.App.<Método>`.
 | `SaveConvenio(input)` | Guardar captura manual |
 | `ChoosePDFs()` | Diálogo nativo de PDF |
 | `ImportPDFs(paths)` | Copiar/registrar PDF y extraer texto |
-| `SaveConvenioTags(id, ids)` | Reemplazar etiquetas y marcar revisado |
+| `SaveConvenioTags(id, ids)` | Reemplazar etiquetas y marcar revisado; rechaza ciudad y estado que no coinciden |
+| `SetNoConvenio(id, noEs)` | Marcar como «no es convenio» o confirmar que sí lo es (agrega las etiquetas obligatorias) |
 | `AcceptSuggestions(id)` | Crear ciudades/facultades y aplicar sugerencias |
 | `DiscardSuggestions(id, remove)` | Descartar; opcionalmente dejar sin etiquetas |
 | `DeleteConvenios(ids)` | Borrar filas y PDF |
-| `DownloadPDF(id)` | Guardar como + copiar PDF |
+| `DownloadPDF(id)` | Guardar como + copiar PDF con el nombre útil |
+| `DownloadPDFs(ids)` | Copiar varios PDF a una carpeta con nombres útiles (sin sobrescribir) |
 | `BeginTranscription(id, total)` | Reiniciar la transcripción y fijar el total de páginas |
 | `TranscribePage(id, page, imageBase64)` | Enviar una página al modelo de visión y guardar el texto |
 | `FailTranscription(id, msg)` | Registrar un error de transcripción |
@@ -142,6 +166,16 @@ El frontend llama `window.go.main.App.<Método>`.
 | `ExtractAI(id)` | Extraer datos y sugerencias |
 | `BackupData()` | Guardar ZIP |
 | `OpenDataFolder()` | Abrir carpeta de datos |
+| `ExportConvenios(ids)` | Paquete `.zip` (manifest.json, convenios.json, pdfs/); todos si `ids` está vacío |
+| `ExportConveniosCSV(ids, filter)` | CSV UTF-8 con BOM; usa el filtro si `ids` está vacío |
+| `ChooseImportFile()` / `ImportConvenios(path)` | Importar paquete, respaldo ZIP o `convenios.db`; omite SHA-256 repetidos |
+| `CheckImport(paths)` | SHA-256 de cada archivo antes de importar: ya registrado (`duplicate_id`) o repetido en la selección |
+| `ListDuplicates()` | Pares por revisar con el resumen de ambos convenios |
+| `DismissDuplicate(a, b)` | Marcar un par como distinto |
+| `LinkVersion(older, newer)` / `UnlinkVersion(id)` | Unir o separar versiones del historial (evita ciclos) |
+| `CheckUpdate()` | Consultar el release más reciente de GitHub |
+| `ApplyUpdate()` | Respaldar base, descargar, verificar, reemplazar el exe y reiniciar (evento `update:progress`) |
+| `OpenReleasePage(url)` | Abrir la página del release |
 
 El servidor de assets de Wails incluye un middleware para `/pdf/<id>`; solo acepta IDs numéricos y sirve desde `data/pdfs`.
 
@@ -163,7 +197,10 @@ El servidor de assets de Wails incluye un middleware para `/pdf/<id>`; solo acep
 - `downloadPDF()`.
 - `renderTagFilter()`, `renderTagSelector()`.
 - `renderTranscription()` / `transcribeCurrent()`: PDF.js detecta páginas sin texto, las renderiza a JPEG y las envía una por una.
-- `confirmDialog()`, `showToast()`, `showLoading()`.
+- `confirmDialog()`, `infoDialog()`, `showToast()`, `showLoading()`.
+- `navigate()`: cambia de vista y pregunta si hay cambios sin guardar (`markDirty()`/`clearDirty()`).
+- `exportPackage()`, `exportCSV()`, `importPackage()`; arrastrar y soltar con `runtime.OnFileDrop`.
+- `checkForUpdates()`, `renderUpdate()`, `applyUpdate()`.
 
 Los estilos están en `styles.css`; no hay dependencias externas ni CDN. PDF.js se sirve localmente desde `vendor/`.
 
@@ -177,12 +214,18 @@ Los estilos están en `styles.css`; no hay dependencias externas ni CDN. PDF.js 
 - Valida fechas, duración, vigencia y etiquetas contra el catálogo.
 - Solo crea ciudades y facultades nuevas; los temas deben existir.
 - Máximo 8 etiquetas; una de ámbito, una de estado, una ciudad, una facultad y hasta 4 temas.
-- La extracción de datos no procesa PDF escaneados sin texto.
+- La extracción de datos no procesa PDF escaneados sin texto, salvo que ya estén transcritos.
+- Nivel de Ajustes `low`/`medium`/`high` (Rápido, Detallado, Máximo; predeterminado `low`). En DeepSeek se envía como `reasoning_effort` `low`/`high`/`max`; visión y búsqueda de ubicación usan `low`.
+- El prompt pide `es_convenio` y `domicilio` de la contraparte. `enrichLocation` busca en DuckDuckGo si falta ciudad o estado, si la ciudad sería nueva o si el domicilio trae `[?]`; las consultas van de una en una con 2.5 s de separación, se guardan en caché y se pausan 15 min si aparece el reto anti-robots.
+- `chat` reintenta a los 3 s y 10 s ante 429, 5xx o errores de red, con un cliente HTTP compartido.
+- `CompactText` reduce espacios y conserva inicio, párrafos con palabras clave y final (máx. 32 000 caracteres).
+- El prompt pide `renovacion: {es, fecha_anterior}`; si el documento declara que renueva a otro, `linkRenewal` une la versión con el candidato de renovación más antiguo que coincide (o el de esa fecha).
+- Con texto transcrito el prompt pide `correcciones` de nombres; `store.ApplyNameCorrections` solo las aplica si ambos nombres tienen dos o más palabras, se parecen (≥0.6) y la forma correcta aparece en el texto.
 
 ### Transcripción
 
 - `TranscribeImage` usa el **modelo de visión** configurado (`vision_model`), no el modelo de texto.
-- El prompt pide transcripción literal, sin resumen, con marcas `[ilegible]`, `[Firma]`, `[Sello]`.
+- El prompt pide transcripción literal, sin resumen, nombres letra por letra, `[?]` en letras dudosas y marcas `[ilegible]`, `[Firma]`, `[Sello: texto]`.
 - La imagen se envía como JPEG base64 en `image_url`.
 - Si el modelo no acepta imágenes, se muestra un error que pide revisar el modelo de visión.
 - El texto se guarda por página; cada guardado reconstruye `convenios.texto` con `texto_pdf` + `[Página N]` y actualiza FTS5.
@@ -194,12 +237,12 @@ La clave se guarda en `settings.json`; la UI solo devuelve una pista (`has_api_k
 
 - Se valida cabecera `%PDF-`, tamaño (100 MB) y páginas (2000).
 - Se copia con nombre aleatorio de 32 hex + `.pdf`.
-- Se calcula SHA-256; duplicados se avisan pero se permiten.
+- Se calcula SHA-256; duplicados se avisan pero se permiten y copian los datos del original (`CloneAnalysis`).
 - `ledongthuc/pdf` extrae texto por página; si falla, el PDF se conserva y se marca escaneado.
 - `es_escaneado` si hay menos de 200 caracteres visibles.
 - `paginas_sin_texto` cuenta páginas con menos de 30 caracteres; alimenta el estado inicial de transcripción.
-- El visor y la descarga usan el archivo original.
-- La transcripción ocurre en la interfaz: PDF.js detecta páginas sin texto y las renderiza a 1600 px como máximo; Go las envía al modelo de visión en paralelo (4 páginas) con reintentos de tokens.
+- El visor y la descarga usan el archivo original; el nombre de descarga lo calcula `store.FileName` al leer el convenio (`archivo_nombre`): `AAAA-MM-DD Tipo - Contraparte - Facultad.pdf`, con la etiqueta de facultad (o «Convenio Abierto»), siglas o la primera contraparte recortada, sin caracteres no válidos en Windows y con máximo 150 caracteres. Sin contraparte se usa el nombre original.
+- La transcripción ocurre en la interfaz: PDF.js detecta páginas sin texto y las renderiza a 1600 px como máximo; Go las envía al modelo de visión con reintentos de tokens. La interfaz procesa 3 archivos a la vez (`AUTO_FILES_AT_ONCE`) y comparte un cupo de 10 páginas simultáneas entre todos (`PAGES_AT_ONCE`, `acquirePageSlot`).
 - No hay OCR local; se depende del servicio externo.
 
 ## 9. Compilar
@@ -226,6 +269,14 @@ build/bin/ConveniosUAGro.exe
 build/bin/Convenios UAGro-amd64-installer.exe
 ```
 
+Compilación con datos de versión (lo hace el flujo de GitHub):
+
+```powershell
+wails build -s -skipbindings -clean -platform windows/amd64 -ldflags "-X main.buildCommit=<sha> -X main.buildDate=<RFC3339>"
+```
+
+`VERSION`, `wails.json` y `appVersion` en `app.go` deben coincidir (`TestVersionFilesMatch`).
+
 ## 10. Pruebas
 
 ```bash
@@ -243,6 +294,10 @@ Cubierto:
 - Fechas en español, interpretación de IA y validación.
 - Transcripción: actualización de FTS5 y búsqueda del texto transcrito.
 - Petición de visión: modelo, autorización y `image_url` con JPEG base64.
+- Migración v1→v6 y v5→v6, búsqueda por firmantes/etiquetas, aproximada y fragmentos.
+- Convenio Abierto, unificación de nombres, copia de análisis de duplicados.
+- Exportar/importar paquete y respaldo, CSV.
+- Actualizaciones: comparación de versiones, release nuevo/igual, descarga con verificación e instalación.
 
 Prueba manual realizada:
 

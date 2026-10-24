@@ -13,7 +13,12 @@ import (
 const (
 	DefaultBaseURL = "https://api.deepseek.com"
 	DefaultModel   = "deepseek-flash"
+	// DefaultAnalysisLevel es el razonamiento bajo: en las pruebas extrajo los
+	// mismos datos que el medio en un tercio del tiempo y de los tokens.
+	DefaultAnalysisLevel = "low"
 )
+
+var analysisLevels = map[string]bool{"low": true, "medium": true, "high": true}
 
 // Config es lo que se persiste en settings.json.
 type Config struct {
@@ -23,6 +28,8 @@ type Config struct {
 	BaseURL          string `json:"base_url"`
 	Model            string `json:"model"`
 	VisionModel      string `json:"vision_model"`
+	AnalysisLevel    string `json:"analysis_level"`
+	UpdateCheck      bool   `json:"update_check"`
 }
 
 // View es la representación segura para la interfaz: nunca expone la clave completa.
@@ -34,6 +41,8 @@ type View struct {
 	BaseURL          string `json:"base_url"`
 	Model            string `json:"model"`
 	VisionModel      string `json:"vision_model"`
+	AnalysisLevel    string `json:"analysis_level"`
+	UpdateCheck      bool   `json:"update_check"`
 }
 
 // SaveInput contiene solo los campos que el usuario puede cambiar.
@@ -45,6 +54,8 @@ type SaveInput struct {
 	BaseURL          string `json:"base_url"`
 	Model            string `json:"model"`
 	VisionModel      string `json:"vision_model"`
+	AnalysisLevel    string `json:"analysis_level"`
+	UpdateCheck      *bool  `json:"update_check"`
 }
 
 func defaults() Config {
@@ -54,6 +65,8 @@ func defaults() Config {
 		BaseURL:          DefaultBaseURL,
 		Model:            DefaultModel,
 		VisionModel:      DefaultModel,
+		AnalysisLevel:    DefaultAnalysisLevel,
+		UpdateCheck:      true,
 	}
 }
 
@@ -91,6 +104,9 @@ func Load(path string) (Config, error) {
 	}
 	if strings.TrimSpace(cfg.VisionModel) == "" {
 		cfg.VisionModel = cfg.Model
+	}
+	if !analysisLevels[cfg.AnalysisLevel] {
+		cfg.AnalysisLevel = DefaultAnalysisLevel
 	}
 	return cfg, nil
 }
@@ -158,6 +174,15 @@ func (c *Config) Apply(in SaveInput) error {
 	if strings.TrimSpace(in.VisionModel) != "" {
 		c.VisionModel = strings.TrimSpace(in.VisionModel)
 	}
+	if level := strings.TrimSpace(in.AnalysisLevel); level != "" {
+		if !analysisLevels[level] {
+			return errors.New("el nivel de análisis no es válido")
+		}
+		c.AnalysisLevel = level
+	}
+	if in.UpdateCheck != nil {
+		c.UpdateCheck = *in.UpdateCheck
+	}
 	if c.VisionModel == "" {
 		c.VisionModel = c.Model
 	}
@@ -194,5 +219,7 @@ func (c Config) ToView() View {
 		BaseURL:          c.BaseURL,
 		Model:            c.Model,
 		VisionModel:      c.VisionModel,
+		AnalysisLevel:    c.AnalysisLevel,
+		UpdateCheck:      c.UpdateCheck,
 	}
 }

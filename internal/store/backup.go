@@ -95,3 +95,13 @@ func addFileToZip(zw *zip.Writer, src, name string) error {
 	_, err = io.Copy(w, in)
 	return err
 }
+
+// SnapshotDB guarda una copia consistente de la base (sin PDF) en dst.
+func (s *Store) SnapshotDB(dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		return err
+	}
+	_ = os.Remove(dst)
+	_, err := s.db.Exec("VACUUM INTO '" + strings.ReplaceAll(dst, "'", "''") + "'")
+	return err
+}
