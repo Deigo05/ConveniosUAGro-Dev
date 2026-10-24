@@ -1,6 +1,6 @@
 # Convenios UAGro Desktop — Documentación técnica
 
-**Versión:** 1.2.2  
+**Versión:** 1.2.3  
 **Estado:** aplicación Windows compilada, probada y entregada en la PC.  
 **Base inicial:** vacía (se crean solo las etiquetas base al primer arranque).
 
@@ -99,7 +99,7 @@ La variable `CONVENIOS_DATA_DIR` permite usar otra carpeta (pruebas). El ejecuta
 - `convenios_fts` (definido en `search.sql`, se crea después de las migraciones): FTS5 propio sobre dependencia, archivo, notas, texto y `busqueda`. Los triggers borran por `rowid` e insertan la fila actual; `ensureSearchIndex` lo reconstruye si el conteo no coincide.
 - `PRAGMA user_version = 6`. Las migraciones agregan transcripción, firmantes/facultad, tipo `facultad`, `facultad_ciudad` y (v6) `busqueda` con el índice nuevo.
 
-Búsqueda: términos con prefijo y frases entre comillas (AND); si no hay resultados se repite con OR y se marca `aproximado`. El orden `relevancia` usa `bm25` y cada fila trae un `fragmento` con la coincidencia entre los caracteres 0x02/0x03.
+Búsqueda: términos con prefijo y frases entre comillas (AND); si no hay resultados se repite con OR y se marca `aproximado`. El orden `relevancia` pone primero, con `relevanceTiers`, lo buscado como frase en `dependencia` (la última palabra como prefijo), luego la frase exacta en cualquier columna, la frase con la última palabra como prefijo y todas las palabras completas, sin prefijo; después ordena por `bm25` con peso 10 para `dependencia`. Sin esos grupos el orden era casi al azar: `bm25` casi anula las palabras que están en más de la mitad de los convenios, y como prefijo «par» y «3» coinciden con «para» y «39070». Cada fila trae un `fragmento` con la coincidencia entre los caracteres 0x02/0x03.
 
 Las etiquetas base son:
 
@@ -301,7 +301,7 @@ Cubierto:
 - Fechas en español, interpretación de IA y validación.
 - Transcripción: actualización de FTS5 y búsqueda del texto transcrito.
 - Petición de visión: modelo, autorización y `image_url` con JPEG base64.
-- Migración v1→v6 y v5→v6, búsqueda por firmantes/etiquetas, aproximada y fragmentos.
+- Migración v1→v6 y v5→v6, búsqueda por firmantes/etiquetas, aproximada y fragmentos; el nombre buscado sale primero aunque sus palabras sean prefijo de otras comunes (`TestSearchRanksNameFirst`).
 - Convenio Abierto, unificación de nombres, copia de análisis de duplicados.
 - Ubicación por web sin salir a internet (caché precargada y modelo simulado): búsqueda por marcas cuando la razón social no aparece, aviso de ubicación tomada de internet, sin aviso al corregir un domicilio que consta y sin ubicación cuando no hay evidencia.
 - Revisión de dudas con la imagen (`TestVerifyDoubtsWithImage`): corrige solo la página dudosa, vuelve a extraer y no repite el ciclo; `ApplyPageCorrections`, `parseDoubts`, `relevantCorrections`, fecha de firma posterior al registro y lugar de firma en la búsqueda de ubicación.

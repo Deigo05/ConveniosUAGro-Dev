@@ -110,6 +110,34 @@ func ftsQuery(q string) string { return strings.Join(searchTerms(q), " AND ") }
 // ningún convenio contiene todas las palabras.
 func ftsQueryAny(q string) string { return strings.Join(searchTerms(q), " OR ") }
 
+// relevanceTiers devuelve, de mayor a menor peso, consultas FTS que suben un
+// resultado sobre los demás: lo buscado como frase en el nombre de la
+// contraparte (la última palabra puede estar a medio escribir), la frase
+// exacta en cualquier campo, la frase con la última palabra como prefijo y
+// todas las palabras completas. Sin ellas, buscar "GRUPO PAR DE 3" ordenaba
+// casi al azar, porque "par" y "3" también son el inicio de "para" y "39070",
+// que aparecen en casi todos.
+func relevanceTiers(q string) []string {
+	words := reSearchWord.FindAllString(q, 12)
+	if len(words) == 0 {
+		return nil
+	}
+	phrase := `"` + strings.Join(words, " ") + `"`
+	var exact []string
+	for _, term := range searchTerms(q) {
+		exact = append(exact, strings.TrimSuffix(term, "*"))
+	}
+	var tiers []string
+	seen := map[string]bool{}
+	for _, tier := range []string{"dependencia : " + phrase + "*", phrase, phrase + "*", strings.Join(exact, " AND ")} {
+		if !seen[tier] {
+			seen[tier] = true
+			tiers = append(tiers, tier)
+		}
+	}
+	return tiers
+}
+
 func (s *Store) tagGroups(ids []int64) (map[string][]int64, error) {
 	out := map[string][]int64{}
 	if len(ids) == 0 {
@@ -239,8 +267,17 @@ func (s *Store) list(f ListFilter, fts string) (ListResult, error) {
 	}
 
 	order := orderSQL(f.Order, f.Dir)
+	var orderArgs []interface{}
 	if fts != "" && (f.Order == "" || f.Order == "relevancia") {
-		order = "bm25(convenios_fts), c.id DESC"
+		var keys []string
+		for _, tier := range relevanceTiers(f.Query) {
+			if tier != fts {
+				keys = append(keys, "c.id IN (SELECT rowid FROM convenios_fts WHERE convenios_fts MATCH ?) DESC")
+				orderArgs = append(orderArgs, tier)
+			}
+		}
+		// Dentro de cada grupo, una coincidencia en el nombre pesa más que en el texto.
+		order = strings.Join(append(keys, "bm25(convenios_fts, 10.0), c.id DESC"), ", ")
 	}
 	offset := (f.Page - 1) * limit
 	query := `SELECT c.id, c.dependencia, coalesce(c.firmante_dependencia,''), coalesce(c.cargo_dependencia,''),
@@ -258,7 +295,7 @@ func (s *Store) list(f ListFilter, fts string) (ListResult, error) {
 		query += `, ''`
 	}
 	query += " FROM " + from + where + " ORDER BY " + order + " LIMIT ? OFFSET ?"
-	argsPage := append(append([]interface{}{}, args...), limit, offset)
+	argsPage := append(append(append([]interface{}{}, args...), orderArgs...), limit, offset)
 
 	rows, err := s.db.Query(query, argsPage...)
 	if err != nil {
