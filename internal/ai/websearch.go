@@ -36,44 +36,46 @@ var search struct {
 	cache        map[string]string
 }
 
-// searchWeb consulta DuckDuckGo HTML y devuelve títulos y fragmentos. No requiere clave.
-func (c *Client) searchWeb(ctx context.Context, query string) string {
+// searchWeb consulta DuckDuckGo HTML y devuelve títulos y fragmentos. No requiere
+// clave. ok es false si no se pudo consultar (sin conexión o con el reto
+// anti-robots), para distinguirlo de una búsqueda sin resultados.
+func (c *Client) searchWeb(ctx context.Context, query string) (results string, ok bool) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return ""
+		return "", false
 	}
 	search.Lock()
 	defer search.Unlock()
 	if r, ok := search.cache[query]; ok {
-		return r
+		return r, true
 	}
 	now := time.Now()
 	if now.Before(search.blockedUntil) {
-		return ""
+		return "", false
 	}
 	if wait := searchGap - now.Sub(search.last); wait > 0 {
 		select {
 		case <-ctx.Done():
-			return ""
+			return "", false
 		case <-time.After(wait):
 		}
 	}
 	search.last = time.Now()
 	body, ok := fetchSearch(ctx, query)
 	if !ok {
-		return ""
+		return "", false
 	}
 	if strings.Contains(body, "anomaly-modal") || strings.Contains(body, "bots use DuckDuckGo") {
 		log.Printf("la búsqueda web pidió verificación anti-robots; se pausa %s", searchBackoff)
 		search.blockedUntil = time.Now().Add(searchBackoff)
-		return ""
+		return "", false
 	}
-	results := parseResults(body)
+	results = parseResults(body)
 	if search.cache == nil {
 		search.cache = map[string]string{}
 	}
 	search.cache[query] = results
-	return results
+	return results, true
 }
 
 func fetchSearch(ctx context.Context, query string) (string, bool) {
@@ -159,12 +161,50 @@ func locationQuery(ext *Extraction) string {
 	return name + " dirección ciudad estado México"
 }
 
+// brandQuery busca por los nombres comerciales con el domicilio o el lugar de
+// firma: "PREGO Salads & Wings Acapulco de Juárez, Guerrero". Se usa cuando la
+// razón social no aparece en internet.
+func brandQuery(ext *Extraction) string {
+	var marcas []string
+	for _, m := range strings.FieldsFunc(ext.Marcas, func(r rune) bool { return r == ';' || r == ',' }) {
+		if m = strings.TrimSpace(m); m != "" && len(marcas) < 3 {
+			marcas = append(marcas, m)
+		}
+	}
+	if len(marcas) == 0 {
+		return ""
+	}
+	q := strings.Join(marcas, " ")
+	if dom := strings.Join(strings.Fields(reDoubt.ReplaceAllString(ext.Domicilio, " ")), " "); dom != "" {
+		q += " " + dom
+	} else if lugar := strings.TrimSpace(ext.LugarFirma); lugar != "" {
+		q += " " + lugar
+	}
+	return truncate(q, 220)
+}
+
+// locationOf devuelve el estado y la ciudad sugeridos.
+func locationOf(list []Suggestion) (estado, ciudad string) {
+	for _, s := range list {
+		switch s.Tipo {
+		case "estado":
+			estado = s.Nombre
+		case "ciudad":
+			ciudad = s.Nombre
+		}
+	}
+	return estado, ciudad
+}
+
 // enrichLocation busca en la web si falta la ciudad o el estado, si la ciudad
 // sería nueva o si el domicilio se leyó con dudas, y pide al modelo que
-// confirme la ubicación con los resultados. Nunca inventa si no hay evidencia.
-func (c *Client) enrichLocation(ctx context.Context, ext *Extraction, catalogo []Tag) {
+// confirme la ubicación con los resultados. Busca primero por la razón social
+// y, si no se confirma, por las marcas. Nunca inventa si no hay evidencia, y
+// si la ubicación no viene del documento lo dice en las notas. Devuelve
+// unavailable si hacía falta buscar y no se pudo consultar internet.
+func (c *Client) enrichLocation(ctx context.Context, ext *Extraction, catalogo []Tag) (unavailable bool) {
 	if !ext.EsConvenio {
-		return
+		return false
 	}
 	hasState, hasCity, uncertainCity := false, false, false
 	for _, s := range ext.Sugerencias {
@@ -179,53 +219,29 @@ func (c *Client) enrichLocation(ctx context.Context, ext *Extraction, catalogo [
 		}
 	}
 	if hasState && hasCity && !uncertainCity && !reDoubt.MatchString(ext.Domicilio) {
-		return
+		return false
 	}
-	query := locationQuery(ext)
-	if query == "" {
-		return
+	var refined []Suggestion
+	tried := map[string]bool{}
+	consulted := false
+	for _, query := range []string{locationQuery(ext), brandQuery(ext)} {
+		if query == "" || tried[query] {
+			continue
+		}
+		tried[query] = true
+		results, ok := c.searchWeb(ctx, query)
+		consulted = consulted || ok
+		if results == "" {
+			continue
+		}
+		if refined = c.confirmLocation(ctx, ext, results, catalogo); len(refined) > 0 {
+			break
+		}
 	}
-	results := c.searchWeb(ctx, query)
-	if results == "" {
-		return
-	}
-	domicilio := ext.Domicilio
-	if domicilio == "" {
-		domicilio = "(no consta)"
-	}
-	if ext.LugarFirma != "" {
-		domicilio += "\nLugar de firma (solo una pista; la contraparte puede estar en otro lugar): " + ext.LugarFirma
-	}
-	prompt := fmt.Sprintf(`Contraparte: %s
-Domicilio en el documento (puede traer errores de lectura): %s
-Resultados web:
-%s
-
-Devuelve {"etiquetas":[{"tipo":"ambito"|"estado"|"ciudad","nombre":s}]} con la ubicación de la contraparte (nunca la de la UAGro): máximo una de cada tipo, nombres exactos del catálogo. La ciudad es el municipio con su nombre oficial y acentos, debe pertenecer al estado y puede ser nueva. Si los resultados no la confirman, o hablan de otra entidad con el mismo nombre, devuelve {"etiquetas":[]}.
-%s`, ext.Dependencia, domicilio, results, locationCatalog(catalogo))
-	body := map[string]interface{}{
-		"model":            c.Model,
-		"temperature":      0.0,
-		"max_tokens":       4000,
-		"reasoning_effort": c.apiEffort(EffortLow),
-		"response_format":  map[string]string{"type": "json_object"},
-		"messages": []map[string]string{
-			{"role": "system", "content": "Ubicas geográficamente a la contraparte de un convenio. Responde solo JSON."},
-			{"role": "user", "content": prompt},
-		},
-	}
-	content, finish, err := c.chat(ctx, body)
-	if err != nil || finish == "length" {
-		return
-	}
-	raw, err := parseJSON(content)
-	if err != nil {
-		return
-	}
-	refined := validateSuggestions(raw["etiquetas"], catalogo)
 	if len(refined) == 0 {
-		return
+		return !consulted
 	}
+	antesEstado, antesCiudad := locationOf(ext.Sugerencias)
 	// Conserva etiquetas no ubicacionales y reemplaza las de ubicación por las refinadas.
 	var merged []Suggestion
 	for _, s := range ext.Sugerencias {
@@ -252,6 +268,69 @@ Devuelve {"etiquetas":[{"tipo":"ambito"|"estado"|"ciudad","nombre":s}]} con la u
 		}
 	}
 	ext.Sugerencias = merged
+	// Avisa cuando la ubicación salió de internet y no del documento: sin
+	// domicilio que la respalde, o con otro estado que el que se leyó.
+	estado, ciudad := locationOf(merged)
+	cambio := !strings.EqualFold(estado, antesEstado) || !strings.EqualFold(ciudad, antesCiudad)
+	if cambio && (ext.Domicilio == "" || (antesEstado != "" && !strings.EqualFold(estado, antesEstado))) {
+		lugar := estado
+		if ciudad != "" && estado != "" {
+			lugar = ciudad + ", " + estado
+		} else if ciudad != "" {
+			lugar = ciudad
+		}
+		if lugar != "" {
+			ext.Notas = strings.TrimSpace(ext.Notas + " Ubicación de la contraparte tomada de internet (no consta en el documento): " + lugar + "; revísela.")
+		}
+	}
+	return false
+}
+
+// confirmLocation pide al modelo la ubicación de la contraparte según los
+// resultados web, solo si hablan claramente de la misma entidad.
+func (c *Client) confirmLocation(ctx context.Context, ext *Extraction, results string, catalogo []Tag) []Suggestion {
+	datos := []string{"Contraparte: " + ext.Dependencia}
+	if ext.Marcas != "" {
+		datos = append(datos, "Marcas: "+ext.Marcas)
+	}
+	if ext.FirmanteDependencia != "" {
+		datos = append(datos, "Representante: "+ext.FirmanteDependencia)
+	}
+	domicilio := ext.Domicilio
+	if domicilio == "" {
+		domicilio = "(no consta)"
+	}
+	datos = append(datos, "Domicilio en el documento (puede traer errores de lectura): "+domicilio)
+	if ext.LugarFirma != "" {
+		datos = append(datos, "Lugar de firma: "+ext.LugarFirma)
+	}
+	prompt := fmt.Sprintf(`%s
+Resultados web:
+%s
+
+Devuelve {"etiquetas":[{"tipo":"ambito"|"estado"|"ciudad","nombre":s}]} con la ubicación de la contraparte (nunca la de la UAGro): máximo una de cada tipo, nombres exactos del catálogo. La ciudad es el municipio con su nombre oficial y acentos, debe pertenecer al estado y puede ser nueva.
+Un resultado vale solo si es claramente la misma entidad: coincide su razón social o una de sus marcas y, si es un nombre que pueden tener varios negocios ("Jardín de Eventos Lua", "Hotel Las Palmas"), también otro dato del documento (domicilio, representante o una ubicación compatible con el lugar de firma). Directorios genéricos, otra entidad con un nombre parecido o resultados que no la ubican no valen: devuelve {"etiquetas":[]}.
+%s`, strings.Join(datos, "\n"), results, locationCatalog(catalogo))
+	body := map[string]interface{}{
+		"model":            c.Model,
+		"temperature":      0.0,
+		"max_tokens":       4000,
+		"reasoning_effort": c.apiEffort(EffortLow),
+		"response_format":  map[string]string{"type": "json_object"},
+		"messages": []map[string]string{
+			{"role": "system", "content": "Ubicas geográficamente a la contraparte de un convenio. Responde solo JSON."},
+			{"role": "user", "content": prompt},
+		},
+	}
+	content, finish, err := c.chat(ctx, body)
+	if err != nil || finish == "length" {
+		return nil
+	}
+	raw, err := parseJSON(content)
+	if err != nil {
+		return nil
+	}
+	return validateSuggestions(raw["etiquetas"], catalogo)
 }
 
 func hasType(list []Suggestion, tipo string) bool {

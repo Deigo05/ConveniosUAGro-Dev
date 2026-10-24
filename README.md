@@ -36,7 +36,7 @@ No hay que instalar un servidor ni iniciar sesión. Todo funciona en la PC.
 - Si la IA está activa, la extracción y la transcripción **comienzan automáticamente al confirmar la importación**. También se extraen los datos al terminar una transcripción manual.
 - Al importar, la app **permanece en la lista de convenios**; el avance de transcripción/análisis aparece en la misma pantalla.
 - Las etiquetas sugeridas por la IA se aplican automáticamente, sin aprobación manual.
-- Si falta la ciudad o el estado, si la ciudad sería nueva o si el domicilio se leyó con dudas, el modelo consulta DuckDuckGo con el nombre de la contraparte y su domicilio para confirmar el municipio (por ejemplo, «Huachinango» → Huauchinango, Puebla).
+- Si falta la ciudad o el estado, si la ciudad sería nueva o si el domicilio se leyó con dudas, el modelo consulta DuckDuckGo con el nombre de la contraparte y su domicilio (o el lugar de firma) para confirmar el municipio (por ejemplo, «Huachinango» → Huauchinango, Puebla). Si la razón social no aparece, busca por las marcas de sus logotipos. Solo acepta resultados que sean claramente la misma entidad, y si la ubicación no consta en el documento la ficha lo avisa para revisarla.
 - Respaldo completo en un archivo ZIP (base de datos + PDF).
 - **Exportar e importar** convenios en un paquete `.zip` (datos, etiquetas, transcripción y PDF) y exportar la lista a CSV. La importación acepta también respaldos ZIP y `convenios.db` de otra instalación.
 - **Duplicados**: aviso antes de importar un PDF ya registrado, marca de «Posible duplicado» mientras exista el otro y una herramienta para revisarlos lado a lado, con los dos PDF abiertos juntos («Comparar PDFs»).
