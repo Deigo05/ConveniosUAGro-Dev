@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.2] - 2026-10-24
+
+### Cambiado
+
+- **Ubicación de la contraparte más confiable**:
+  - La IA anota los nombres comerciales que aparecen en logotipos y encabezados (por ejemplo «PREGO» y «Salads & Wings» de «GRUPO PAR DE 3 S DE RL DE CV»). Si la razón social no aparece en internet, se busca por esas marcas con el lugar de firma.
+  - Un resultado web solo cuenta si es claramente la misma entidad: coincide la razón social o una marca y, si el nombre es común («Jardín de Eventos Lua»), también otro dato del documento (domicilio, representante o una ubicación compatible con el lugar de firma). Los directorios genéricos y los negocios homónimos de otro estado ya no se aceptan.
+  - Si la ubicación sale de internet y no del documento, la ficha lo avisa: «Ubicación de la contraparte tomada de internet (no consta en el documento): …; revísela».
+  - El estado y la ciudad solo salen de lo que dice el documento (domicilio de la contraparte o un nombre que incluye el lugar, como «Ayuntamiento de Taxco») o de internet. El lugar de firma y los domicilios de la UAGro ya no bastan, porque la contraparte puede ser de otra ciudad.
+  - Si un convenio nacional queda sin ubicación, la ficha explica por qué: no consta y no se confirmó en internet, o no se pudo consultar internet (por ejemplo, si el buscador pidió verificación anti-robots) y conviene volver a extraer los datos más tarde.
+
 ## [1.2.1] - 2026-10-24
 
 ### Agregado

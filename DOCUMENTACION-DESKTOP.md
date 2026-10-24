@@ -1,6 +1,6 @@
 # Convenios UAGro Desktop — Documentación técnica
 
-**Versión:** 1.2.1  
+**Versión:** 1.2.2  
 **Estado:** aplicación Windows compilada, probada y entregada en la PC.  
 **Base inicial:** vacía (se crean solo las etiquetas base al primer arranque).
 
@@ -217,6 +217,10 @@ Los estilos están en `styles.css`; no hay dependencias externas ni CDN. PDF.js 
 - La extracción de datos no procesa PDF escaneados sin texto, salvo que ya estén transcritos.
 - Nivel de Ajustes `low`/`medium`/`high` (Rápido, Detallado, Máximo; predeterminado `low`). En DeepSeek se envía como `reasoning_effort` `low`/`high`/`max`; visión y búsqueda de ubicación usan `low`.
 - El prompt pide `es_convenio` y `domicilio` de la contraparte. `enrichLocation` busca en DuckDuckGo si falta ciudad o estado, si la ciudad sería nueva o si el domicilio trae `[?]`; las consultas van de una en una con 2.5 s de separación, se guardan en caché y se pausan 15 min si aparece el reto anti-robots.
+- Consultas de ubicación: primero `locationQuery` (razón social, o siglas si es muy larga, más domicilio o `lugar_firma`); si `confirmLocation` no confirma nada, `brandQuery` (hasta 3 `marcas` de logotipos y encabezados, más domicilio o lugar de firma). `confirmLocation` envía razón social, marcas, representante, domicilio y lugar de firma, y solo acepta resultados que sean claramente la misma entidad (con un nombre común exige otro dato coincidente).
+- Si la ubicación cambia con la web y no hay domicilio en el documento (o cambia el estado leído), `enrichLocation` agrega a `notas` «Ubicación de la contraparte tomada de internet (no consta en el documento): …; revísela». Si solo corrige un municipio de un domicilio que sí consta, no avisa.
+- La regla 6 del prompt pide estado y ciudad solo si el documento dice dónde está la contraparte; el lugar de firma y los domicilios de la UAGro no bastan (el lugar de firma solo se usa como pista en la búsqueda).
+- `searchWeb` devuelve `ok=false` si no pudo consultar (sin conexión o con el reto anti-robots) y `enrichLocation` devuelve `unavailable`. `noteMissingLocation` explica en `notas` por qué un convenio nacional queda sin estado: no consta ni se confirmó en internet, no se pudo consultar internet (volver a extraer más tarde) o la búsqueda web está desactivada.
 - `chat` reintenta a los 3 s y 10 s ante 429, 5xx o errores de red, con un cliente HTTP compartido.
 - `CompactText` reduce espacios y conserva inicio, párrafos con palabras clave y final (máx. 32 000 caracteres).
 - El prompt pide `renovacion: {es, fecha_anterior}`; si el documento declara que renueva a otro, `linkRenewal` une la versión con el candidato de renovación más antiguo que coincide (o el de esa fecha).
@@ -299,6 +303,7 @@ Cubierto:
 - Petición de visión: modelo, autorización y `image_url` con JPEG base64.
 - Migración v1→v6 y v5→v6, búsqueda por firmantes/etiquetas, aproximada y fragmentos.
 - Convenio Abierto, unificación de nombres, copia de análisis de duplicados.
+- Ubicación por web sin salir a internet (caché precargada y modelo simulado): búsqueda por marcas cuando la razón social no aparece, aviso de ubicación tomada de internet, sin aviso al corregir un domicilio que consta y sin ubicación cuando no hay evidencia.
 - Revisión de dudas con la imagen (`TestVerifyDoubtsWithImage`): corrige solo la página dudosa, vuelve a extraer y no repite el ciclo; `ApplyPageCorrections`, `parseDoubts`, `relevantCorrections`, fecha de firma posterior al registro y lugar de firma en la búsqueda de ubicación.
 - Exportar/importar paquete y respaldo, CSV.
 - Actualizaciones: comparación de versiones, release nuevo/igual, descarga con verificación e instalación.

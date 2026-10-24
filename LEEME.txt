@@ -59,7 +59,9 @@ DATOS EXTRAÍDOS
 - Solo se permite una etiqueta de ciudad: la ciudad donde se ubica la dependencia.
 - Cada ciudad pertenece a un estado: la app no deja combinarla con otro estado y todo estado de México lleva la etiqueta "Nacional". El estado de cada ciudad se ve y se cambia en Etiquetas.
 - La ciudad de la facultad es independiente: por ejemplo, la Facultad de Turismo es de Acapulco aunque la dependencia esté en Tijuana.
-- Si falta la ciudad o el estado, o el domicilio se leyó con dudas, la IA busca en internet con el nombre de la contraparte y su domicilio.
+- Si falta la ciudad o el estado, o el domicilio se leyó con dudas, la IA busca en internet con el nombre de la contraparte y su domicilio (o el lugar de firma). Si no la encuentra por su razón social, busca por las marcas de sus logotipos (por ejemplo "PREGO").
+- Solo usa lo que encuentre si es claramente la misma empresa o institución. Cuando la ubicación no consta en el documento y sale de internet, la ficha lo dice para que la revises.
+- El lugar donde se firmó no se toma como ubicación de la contraparte. Si no se pudo ubicar, la ficha lo explica; si dice que no se pudo consultar internet, vuelve a pulsar "Extraer datos con IA" más tarde.
 - Si el convenio no dice con qué facultad de la UAGro se firmó, recibe la etiqueta "Convenio Abierto". Todo convenio analizado lleva su facultad (o Convenio Abierto) y su ámbito.
 - Si el archivo no parece un convenio (acta, oficio, constancia...), se marca "¿No es convenio?". Usa el botón "No son convenios" de la lista para verlos; en la ficha puedes confirmar que sí es convenio o eliminarlo.
 - Tipo de documento y siglas de la contraparte. Con ellos el PDF se descarga con un nombre útil aunque se haya subido como "Escaner123515.pdf":

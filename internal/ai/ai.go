@@ -74,8 +74,11 @@ type Extraction struct {
 	EsConvenio bool
 	// Domicilio es el de la contraparte tal como aparece; ayuda a buscar su
 	// ciudad en la web, igual que LugarFirma cuando no consta el domicilio.
+	// Marcas son sus nombres comerciales (de logotipos o encabezados): un
+	// negocio suele aparecer en internet por su marca y no por su razón social.
 	Domicilio  string
 	LugarFirma string
+	Marcas     string
 	// Dudas son contradicciones de lectura en páginas transcritas que el texto
 	// no basta para resolver; se revisan después con la imagen de la página.
 	Dudas []Doubt
@@ -281,15 +284,15 @@ func (c *Client) post(ctx context.Context, payload []byte) ([]byte, int, error) 
 // systemPrompt es breve a propósito: cada regla evita un error observado en
 // convenios reales (fechas de nombramiento, testigos, facultad inventada…).
 var systemPrompt = `Extraes datos de convenios de la Universidad Autónoma de Guerrero (UAGro), México. Responde solo con un objeto JSON con estas claves:
-{"es_convenio":b,"tipo_documento":"Convenio General"|"Convenio Específico"|"Convenio Marco"|"Convenio de Colaboración"|"Convenio Modificatorio"|"Carta de Intención"|"Contrato"|"Acuerdo"|"Otro"|null,"dependencia":s|null,"dependencia_corta":s|null,"domicilio":s|null,"firmante_dependencia":s|null,"cargo_dependencia":s|null,"firmante_uagro":s|null,"cargo_uagro":s|null,"facultad":s|null,"facultad_ciudad":s|null,"fecha_firma":"AAAA-MM-DD"|null,"fecha_firma_texto":s|null,"lugar_firma":s|null,"vigencia_tipo":"fecha_exacta"|"duracion"|"indefinida"|"no_encontrada","fecha_vigencia":"AAAA-MM-DD"|null,"vigencia_duracion":{"anios":n,"meses":n,"dias":n}|null,"vigencia_inicio":"firma"|"AAAA-MM-DD"|null,"vigencia_texto":s|null,"etiquetas":[{"tipo":"ambito"|"estado"|"ciudad"|"tema","nombre":s}],"correcciones":[{"original":s,"correcto":s}],"dudas":[{"paginas":[n],"dato":s,"lecturas":[s]}],"renovacion":{"es":b,"fecha_anterior":"AAAA-MM-DD"|null},"notas":s|null}
+{"es_convenio":b,"tipo_documento":"Convenio General"|"Convenio Específico"|"Convenio Marco"|"Convenio de Colaboración"|"Convenio Modificatorio"|"Carta de Intención"|"Contrato"|"Acuerdo"|"Otro"|null,"dependencia":s|null,"dependencia_corta":s|null,"domicilio":s|null,"firmante_dependencia":s|null,"cargo_dependencia":s|null,"firmante_uagro":s|null,"cargo_uagro":s|null,"facultad":s|null,"facultad_ciudad":s|null,"fecha_firma":"AAAA-MM-DD"|null,"fecha_firma_texto":s|null,"lugar_firma":s|null,"marcas":s|null,"vigencia_tipo":"fecha_exacta"|"duracion"|"indefinida"|"no_encontrada","fecha_vigencia":"AAAA-MM-DD"|null,"vigencia_duracion":{"anios":n,"meses":n,"dias":n}|null,"vigencia_inicio":"firma"|"AAAA-MM-DD"|null,"vigencia_texto":s|null,"etiquetas":[{"tipo":"ambito"|"estado"|"ciudad"|"tema","nombre":s}],"correcciones":[{"original":s,"correcto":s}],"dudas":[{"paginas":[n],"dato":s,"lecturas":[s]}],"renovacion":{"es":b,"fecha_anterior":"AAAA-MM-DD"|null},"notas":s|null}
 Reglas:
 0. "es_convenio": false si el archivo no es un convenio, acuerdo, contrato o carta de intención entre la UAGro y otra parte (por ejemplo: acta constitutiva, poder notarial, oficio, constancia, certificado, identificación, factura); di qué es en "notas" y llena solo lo que conste.
-1. Partes: búscalas en el proemio ("CONVENIO ... QUE CELEBRAN ...") y en las declaraciones. "dependencia" es la contraparte con su nombre oficial completo; nunca la UAGro ni sus facultades. Varias contrapartes: sepáralas con "; ". "dependencia_corta": sus siglas oficiales si aparecen en el texto ("IMSS", "SEG") o un nombre corto de máximo 40 caracteres ("Ayuntamiento de Acapulco"). "tipo_documento": según el título del documento; "Convenio Modificatorio" incluye addenda. "domicilio": el de la contraparte tal como aparece (máximo 150 caracteres).
+1. Partes: búscalas en el proemio ("CONVENIO ... QUE CELEBRAN ...") y en las declaraciones. "dependencia" es la contraparte con su nombre oficial completo; nunca la UAGro ni sus facultades. Varias contrapartes: sepáralas con "; ". "dependencia_corta": sus siglas oficiales si aparecen en el texto ("IMSS", "SEG") o un nombre corto de máximo 40 caracteres ("Ayuntamiento de Acapulco"). "tipo_documento": según el título del documento; "Convenio Modificatorio" incluye addenda. "domicilio": el de la contraparte tal como aparece (máximo 150 caracteres). "marcas": nombres comerciales de la contraparte distintos de su razón social, de sus logotipos, encabezados o texto ("PREGO; Salads & Wings"), nunca los de la UAGro u otras instituciones; si una marca se leyó de varias formas, usa la más probable.
 2. Firmantes: nombre y cargo de quien firma por cada parte, sin grados ni tratamientos (Dr., Mtra., Lic., C.). Tómalos del bloque de firmas final y compáralos con quien representa a esa parte en el proemio y las declaraciones; si no se leen, usa las declaraciones. Testigos, testigos de honor y notarios no son firmantes.
 3. "facultad": solo si el texto dice expresamente que una facultad, escuela o unidad académica de la UAGro celebra, suscribe o participa (o firma su director). Si firma la Rectoría o la universidad en general sin nombrar una unidad académica, usa null. Escribe el nombre oficial del catálogo, sin ciudad: los nombres anteriores o abreviados son la misma unidad ("Unidad Académica de Turismo", "UAGro-FT" → "Facultad de Turismo"; "EMVZ No. 3" → "Escuela Superior de Medicina Veterinaria y Zootecnia 03"). Si no está en el catálogo, cópiala tal como aparece. "facultad_ciudad": sede de la facultad según el catálogo o el domicilio de la UAGro en el documento, nunca la ciudad de la contraparte; null si no consta. Catálogo (nombre y sedes): ` + uagro.CatalogText() + `.
 4. "fecha_firma": la del cierre ("firmado en ... a los X días del mes de ... de ..."); nunca fechas de nombramientos, decretos, actas o publicaciones, ni una fecha posterior al registro del documento. Lo marcado [Tachado: ...] no vale. Si el cierre y una anotación de firmas ("las firmas que anteceden corresponden al acuerdo ... en fecha ...") no coinciden, usa la de la anotación (suele ser la que se actualizó al firmar, y el cierre puede estar tachado) y dilo en "notas". "fecha_firma_texto": ese fragmento literal. "lugar_firma": ciudad y estado donde se firma, tal como aparecen. "renovacion.es": true solo si el documento dice que renueva, sustituye o da continuidad a un convenio anterior con la misma contraparte (no basta con citarlo en antecedentes); "fecha_anterior": la firma de ese convenio anterior si consta.
 5. Vigencia: fecha de término explícita → "fecha_exacta". Plazo ("tres años") → "duracion" con "vigencia_duracion" y "vigencia_inicio" ("firma" si cuenta desde la firma, o la fecha de inicio indicada); "fecha_vigencia" queda null porque el sistema la calcula. Tiempo indefinido o indeterminado → "indefinida". "vigencia_texto": cita literal de la cláusula, máximo 300 caracteres.
-6. "etiquetas" con nombres exactos del catálogo: ambito siempre 1 ("Nacional" si la contraparte es de México, "Internacional" si es de otro país); estado 0-1 (de la contraparte); ciudad 0-1: municipio de la contraparte (nunca el de la UAGro) que pertenezca a ese estado; puede ser nueva. Escribe el nombre oficial del municipio con acentos y corrige errores de lectura evidentes de un municipio que conozcas ("Huachinango, Pue." → "Huauchinango"); si no estás seguro, omítela. tema 0-4 (solo existentes). No incluyas facultades.
+6. "etiquetas" con nombres exactos del catálogo: ambito siempre 1 ("Nacional" si la contraparte es de México, "Internacional" si es de otro país); estado 0-1 y ciudad 0-1: dónde está la contraparte según el documento (su domicilio, o su nombre si incluye el lugar, como "Ayuntamiento de Taxco"); el lugar de firma y los domicilios de la UAGro no bastan: si no consta, omítelos. La ciudad es el municipio, debe pertenecer a ese estado y puede ser nueva. Escribe el nombre oficial del municipio con acentos y corrige errores de lectura evidentes de un municipio que conozcas ("Huachinango, Pue." → "Huauchinango"); si no estás seguro, omítela. tema 0-4 (solo existentes). No incluyas facultades.
 7. No inventes: dato ausente o dudoso → null. "notas": máximo una frase con lo que el usuario deba revisar en el documento: un dato clave que no consta (contraparte, fecha de firma o vigencia) o una contradicción que no pudiste resolver. No menciones datos secundarios que falten (domicilio, siglas, testigos) ni errores de lectura que ya resolviste (lo que pongas en "correcciones" no va en "notas"); si no hay nada que revisar, null.`
 
 // correctionsRule se agrega solo cuando el texto incluye páginas transcritas
@@ -359,12 +362,37 @@ func (c *Client) Extract(ctx context.Context, texto string, catalogo []Tag, tran
 			ext.Dudas = parseDoubts(raw["dudas"])
 		}
 		c.checkSignatureDate(&ext)
+		unavailable := false
 		if c.WebSearch {
-			c.enrichLocation(ctx, &ext, catalogo)
+			unavailable = c.enrichLocation(ctx, &ext, catalogo)
 		}
+		noteMissingLocation(&ext, c.WebSearch, unavailable)
 		return ext, nil
 	}
 	return out, errors.New("la extracción con IA se cortó por longitud incluso con más tokens; intente con un PDF más corto")
+}
+
+// noteMissingLocation explica en las notas por qué un convenio nacional queda
+// sin estado ni ciudad, para que el usuario la agregue o vuelva a intentar.
+func noteMissingLocation(ext *Extraction, webSearch, unavailable bool) {
+	if !ext.EsConvenio || hasType(ext.Sugerencias, "estado") {
+		return
+	}
+	for _, s := range ext.Sugerencias {
+		if s.Tipo == "ambito" && s.Nombre == "Internacional" {
+			return
+		}
+	}
+	note := "La ubicación de la contraparte no consta en el documento"
+	switch {
+	case unavailable:
+		note += " y no se pudo consultar internet; vuelva a extraer los datos más tarde o agréguela a mano."
+	case webSearch:
+		note += " ni se confirmó en internet; agréguela a mano si la conoce."
+	default:
+		note += "; agréguela a mano si la conoce."
+	}
+	ext.Notas = strings.TrimSpace(ext.Notas + " " + note)
 }
 
 // checkSignatureDate avisa cuando la fecha de firma es posterior al registro
@@ -778,6 +806,7 @@ func interpret(raw map[string]interface{}, catalogo []Tag) (Extraction, error) {
 	out.TipoDocumento = truncate(get("tipo_documento"), 80)
 	out.Domicilio = truncate(get("domicilio"), 200)
 	out.LugarFirma = truncate(get("lugar_firma"), 120)
+	out.Marcas = truncate(get("marcas"), 120)
 	// Si el modelo no lo dice, se asume que es un convenio.
 	out.EsConvenio = true
 	if v, ok := raw["es_convenio"]; ok && v != nil {
