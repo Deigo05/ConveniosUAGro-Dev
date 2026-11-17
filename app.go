@@ -30,7 +30,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.2.4"
+const appVersion = "1.3.0"
 
 // buildCommit y buildDate se fijan al compilar en GitHub Actions con
 // -ldflags "-X main.buildCommit=<sha> -X main.buildDate=<RFC3339>". En una
@@ -453,6 +453,31 @@ func (a *App) DownloadPDFs(ids []int64) (ExportResult, error) {
 		return ExportResult{}, fmt.Errorf("no se pudo guardar ningún PDF (%s)", strings.Join(failed, ", "))
 	}
 	return ExportResult{Path: dir, Total: n}, nil
+}
+
+// DownloadPDFsFiltered guarda en una carpeta los PDF de todos los convenios
+// que cumplen el filtro actual (búsqueda, vigencia, etiquetas…), no solo los
+// de la página visible.
+func (a *App) DownloadPDFsFiltered(f store.ListFilter) (ExportResult, error) {
+	ids, err := a.store.FilterIDs(f)
+	if err != nil {
+		return ExportResult{}, err
+	}
+	if len(ids) == 0 {
+		return ExportResult{}, errors.New("no hay convenios con los filtros actuales")
+	}
+	return a.DownloadPDFs(ids)
+}
+
+// ArchiveConvenios pasa los convenios a la sección de archivados: dejan de
+// aparecer en la lista principal y en sus contadores, pero no se borra nada.
+func (a *App) ArchiveConvenios(ids []int64) (int, error) {
+	return a.store.SetArchived(ids, true)
+}
+
+// UnarchiveConvenios devuelve convenios archivados a la lista principal.
+func (a *App) UnarchiveConvenios(ids []int64) (int, error) {
+	return a.store.SetArchived(ids, false)
 }
 
 func dirExists(path string) bool {

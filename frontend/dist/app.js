@@ -34,6 +34,7 @@ const state = {
   tagTimer: null,
   loadingCount: 0,
   listLoading: false,
+  listReload: false,
   pollTimer: null,
   update: null,
   updateError: '',
@@ -47,7 +48,17 @@ const state = {
   dupsFilter: '',
   dupCompare: '',
   importChecks: [],
-  versionDir: 'older'
+  versionDir: 'older',
+  // Convenios que la cola de IA está procesando en este momento.
+  autoActive: new Set(),
+  // De qué sección se abrió la ficha, para que «Volver» regrese ahí.
+  detailFrom: 'convenios',
+  // Sección de archivados: su propio buscador, orden, página y selección.
+  arch: {
+    query: '', order: 'archivado_en', dir: 'desc', page: 1,
+    result: { items: [], total: 0, total_registrados: 0, page: 1, pages: 1 },
+    selected: new Set(), loading: false, reload: false, timer: null
+  }
 };
 
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -139,9 +150,22 @@ function bindEvents() {
   $('#btn-bulk-csv').addEventListener('click', () => exportCSV(Array.from(state.selected)));
   $('#btn-bulk-export').addEventListener('click', () => exportPackage(Array.from(state.selected)));
   $('#btn-bulk-pdf').addEventListener('click', () => downloadPDFs(Array.from(state.selected)));
-  $('#btn-export-results').addEventListener('click', () => exportCSV([], state.filters));
+  $('#btn-bulk-ai').addEventListener('click', () => analyzeWithAI(Array.from(state.selected)));
+  $('#btn-bulk-archive').addEventListener('click', () => setArchived(Array.from(state.selected), true));
+  $('#btn-download-results').addEventListener('click', toggleDownloadMenu);
+  $('#download-menu').addEventListener('click', e => {
+    const item = e.target.closest('[data-download-results]');
+    if (item) downloadResults(item.dataset.downloadResults);
+  });
+  document.addEventListener('click', e => {
+    if (!$('#download-menu').hidden && !e.target.closest('#download-wrap')) closeDownloadMenu();
+  });
+  bindArchivedEvents();
 
-  $('#detail-back').addEventListener('click', () => navigate('convenios'));
+  $('#detail-back').addEventListener('click', () => navigate(state.detailFrom || 'convenios'));
+  $('#btn-archive').addEventListener('click', () => {
+    if (state.current) setArchived([state.current.id], !state.current.archivado_en);
+  });
   $('#form-edit').addEventListener('submit', saveConvenio);
   $('#form-edit').addEventListener('input', markDirty);
   $('#form-edit').addEventListener('change', markDirty);
@@ -209,6 +233,7 @@ function bindEvents() {
       if ($('#dialog-import').open) $('#dialog-import').close();
       if ($('#dialog-tag').open) $('#dialog-tag').close();
       if ($('#dialog-update').open) $('#dialog-update').close();
+      if (!$('#download-menu').hidden) { closeDownloadMenu(); $('#btn-download-results').focus(); }
     }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && state.view === 'detalle') {
       e.preventDefault();
@@ -219,7 +244,8 @@ function bindEvents() {
     const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT');
     if (!typing && e.key === '/') {
       e.preventDefault();
-      navigate('convenios').then(ok => { if (ok) $('#search')?.focus(); });
+      if (state.view === 'archivados') $('#arch-search')?.focus();
+      else navigate('convenios').then(ok => { if (ok) $('#search')?.focus(); });
     }
     if (!typing && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'n') {
       e.preventDefault();
@@ -248,6 +274,9 @@ function renderNav() {
   const total = state.stats.total || 0;
   $('#nav-count').textContent = total;
   $('#nav-count').hidden = total === 0;
+  const archivados = state.stats.archivados || 0;
+  $('#nav-arch-count').textContent = archivados;
+  $('#nav-arch-count').hidden = archivados === 0;
   $('#sidebar-version').textContent = state.app.version ? `Versión ${state.app.version}` : '';
   document.title = 'Convenios UAGro';
 }
@@ -280,7 +309,7 @@ function setVigencia(value) {
 }
 
 function emptyFilter() {
-  return { query: '', tag_ids: [], vigencia: '', solo_pendientes: false, solo_no_convenios: false, incluir_anteriores: false, order: 'id', dir: 'desc', page: 1 };
+  return { query: '', tag_ids: [], vigencia: '', solo_pendientes: false, solo_no_convenios: false, incluir_anteriores: false, archivados: false, order: 'id', dir: 'desc', page: 1 };
 }
 
 // syncReviewButtons muestra los atajos de revisión solo si hay algo que revisar
@@ -308,7 +337,9 @@ function syncRelevanceOrder() {
 }
 
 async function loadList(options = {}) {
-  if (state.listLoading) return;
+  // Una recarga pedida mientras otra está en curso no se pierde: se repite al
+  // terminar, para que la lista (y lo que se descarga) siga al filtro actual.
+  if (state.listLoading) { state.listReload = true; return; }
   state.listLoading = true;
   const selected = options.preserveSelection ? new Set(state.selected) : null;
   const area = $('#list-area');
@@ -337,6 +368,7 @@ async function loadList(options = {}) {
   } finally {
     state.listLoading = false;
     area.removeAttribute('aria-busy');
+    if (state.listReload) { state.listReload = false; loadList({ preserveSelection: true }); }
   }
 }
 
@@ -483,7 +515,7 @@ function renderList() {
   const area = $('#list-area');
   const items = state.result.items || [];
   $('#approx-banner').hidden = !(state.result.aproximado && items.length);
-  $('#btn-export-results').hidden = !items.length;
+  renderDownloadButton();
   if (!items.length) {
     const filtered = state.filters.query || state.filters.tag_ids.length || state.filters.vigencia || state.filters.solo_pendientes;
     area.innerHTML = filtered ? `
@@ -585,14 +617,26 @@ function rowHTML(c) {
     <td class="cell-date">${c.vigencia_indefinida ? '<span class="muted">Indefinida</span>' : (formatDate(c.fecha_vigencia) || '—')}${relativeVigencia(c)}</td>
     <td>${stateBadge(c.estado)}</td>
     <td><button class="btn btn--text btn--small" data-download="${c.id}" title="Descargar PDF"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg> PDF</button></td>
-    <td class="cell-actions"><button class="btn btn--outline btn--small" data-open-btn="${c.id}">Abrir</button></td>
+    <td class="cell-actions"><div class="cell-actions__stack"><button class="btn btn--outline btn--small" data-open-btn="${c.id}">Abrir</button>${aiButtonHTML(c)}</div></td>
   </tr>`;
+}
+
+// aiButtonHTML es el botón «Analizar con IA» de cada fila. Mientras el
+// convenio está en la cola o en proceso se muestra su estado.
+function aiButtonHTML(c) {
+  if (state.autoActive.has(c.id) || isProcessing(c)) {
+    return '<button type="button" class="btn btn--text btn--small btn-ai" disabled><span class="spinner"></span> Analizando…</button>';
+  }
+  if (state.autoQueue.includes(c.id)) {
+    return '<button type="button" class="btn btn--text btn--small btn-ai" disabled>En cola</button>';
+  }
+  return `<button type="button" class="btn btn--text btn--small btn-ai" data-ai="${c.id}" title="Todo el análisis con IA: transcribe las páginas escaneadas que falten, extrae los datos y revisa las dudas de lectura">Analizar con IA</button>`;
 }
 
 // snippetHTML muestra el fragmento del texto donde aparece la búsqueda; el
 // servidor marca la coincidencia con los caracteres de control 2 y 3.
-function snippetHTML(text) {
-  if (!text || !state.filters.query.trim()) return '';
+function snippetHTML(text, query = state.filters.query) {
+  if (!text || !String(query || '').trim()) return '';
   const html = esc(text).replace(/\u0002/g, '<mark>').replace(/\u0003/g, '</mark>');
   return `<div class="snippet">${html}</div>`;
 }
@@ -683,14 +727,21 @@ function onListClick(e) {
     downloadPDF(Number(download.dataset.download));
     return;
   }
+  const aiBtn = e.target.closest('[data-ai]');
+  if (aiBtn) {
+    e.stopPropagation();
+    analyzeWithAI([Number(aiBtn.dataset.ai)]);
+    return;
+  }
+  if (e.target.closest('.btn-ai')) { e.stopPropagation(); return; }
   const openBtn = e.target.closest('[data-open-btn]');
   if (openBtn) {
     e.stopPropagation();
-    openDetail(Number(openBtn.dataset.openBtn));
+    openDetail(Number(openBtn.dataset.openBtn), 'convenios');
     return;
   }
   const row = e.target.closest('[data-open]');
-  if (row && !e.target.closest('input')) openDetail(Number(row.dataset.open));
+  if (row && !e.target.closest('input')) openDetail(Number(row.dataset.open), 'convenios');
 }
 
 function onListChange(e) {
@@ -756,7 +807,9 @@ async function bulkDelete() {
   }
 }
 
-async function openDetail(id) {
+async function openDetail(id, from) {
+  if (from) state.detailFrom = from;
+  else if (state.view !== 'detalle') state.detailFrom = 'convenios';
   showLoading(true);
   try {
     const c = await call('GetConvenio', id);
@@ -804,6 +857,23 @@ function renderDetail() {
   renderDetailMeta();
   renderRelations();
   renderNoConvenio();
+  renderArchivedState();
+}
+
+// renderArchivedState muestra si el convenio está archivado: en ese caso el
+// botón «Archivar» se cambia por un aviso con «Devolver a la lista».
+function renderArchivedState() {
+  const c = state.current;
+  const archived = Boolean(c.archivado_en);
+  // Archivado, el aviso de arriba ya ofrece «Devolver a la lista».
+  $('#btn-archive').hidden = archived;
+  const el = $('#detail-archived-banner');
+  el.hidden = !archived;
+  if (archived) {
+    el.innerHTML = `<span><strong>Convenio archivado el ${esc(formatDate(c.archivado_en))}.</strong> No aparece en la lista principal ni en su buscador; se consulta en Archivados.</span>
+      <span class="banner__buttons"><button class="btn btn--outline btn--small" data-unarchive-current>Devolver a la lista</button></span>`;
+    el.querySelector('[data-unarchive-current]').addEventListener('click', () => setArchived([c.id], false));
+  }
 }
 
 function renderNoConvenio() {
@@ -1225,7 +1295,8 @@ async function transcribeCurrent() {
 
 function startAutoAI(ids) {
   if (!ids || !ids.length || !state.config.ai_enabled || !state.config.has_api_key) return;
-  const nuevos = ids.filter(Boolean);
+  const nuevos = [...new Set(ids)].filter(id => id && !state.autoQueue.includes(id) && !state.autoActive.has(id));
+  if (!nuevos.length) return;
   state.autoQueue.push(...nuevos);
   if (state.autoRunning) {
     state.autoTotal += nuevos.length;
@@ -1250,6 +1321,7 @@ async function runAutoAIQueue() {
   const worker = async () => {
     while (state.autoQueue.length) {
       const id = state.autoQueue.shift();
+      state.autoActive.add(id);
       try {
         await processAutoFile(id);
       } catch (err) {
@@ -1257,6 +1329,7 @@ async function runAutoAIQueue() {
         failed++;
         showToast('La IA no pudo completar un archivo: ' + errorText(err), 'error');
       } finally {
+        state.autoActive.delete(id);
         state.autoDone++;
         renderAIActivity();
       }
@@ -1744,11 +1817,15 @@ async function confirmImport() {
 function showView(view) {
   state.view = view;
   $$('.view').forEach(v => v.hidden = true);
-  const map = { convenios: 'view-convenios', detalle: 'view-detail', duplicados: 'view-dups', etiquetas: 'view-tags', ajustes: 'view-settings' };
+  const map = { convenios: 'view-convenios', archivados: 'view-archived', detalle: 'view-detail', duplicados: 'view-dups', etiquetas: 'view-tags', ajustes: 'view-settings' };
   $('#' + (map[view] || 'view-convenios')).hidden = false;
-  $$('.nav__item').forEach(b => b.classList.toggle('is-active', b.dataset.view === view || (view === 'detalle' && b.dataset.view === 'convenios')));
+  const parent = state.detailFrom === 'archivados' ? 'archivados' : 'convenios';
+  $$('.nav__item').forEach(b => b.classList.toggle('is-active', b.dataset.view === view || (view === 'detalle' && b.dataset.view === parent)));
+  $('#detail-back-label').textContent = parent === 'archivados' ? 'Volver a archivados' : 'Volver a convenios';
+  closeDownloadMenu();
   const titles = {
     convenios: ['Convenios', 'Administra y consulta los convenios de la UAGro.'],
+    archivados: ['Archivados', 'Convenios que sacaste de la lista principal, con su propio buscador.'],
     detalle: ['Ficha del convenio', 'Revisa el documento, los datos y las etiquetas.'],
     duplicados: ['Duplicados y versiones', 'Encuentra documentos repetidos y convenios renovados.'],
     etiquetas: ['Etiquetas', 'Catálogo local para clasificar los convenios.'],
@@ -1762,6 +1839,7 @@ function showView(view) {
   if (view === 'etiquetas') renderTagsView();
   if (view === 'ajustes') renderSettings();
   if (view === 'duplicados') loadDuplicates();
+  if (view === 'archivados') loadArchived();
   if (view === 'convenios') {
     renderProcessingBanner();
     syncProcessingPoll();
@@ -2168,6 +2246,315 @@ async function exportCSV(ids, filter) {
   } catch (err) {
     showToast(errorText(err), 'error');
   }
+}
+
+// ---------- Descarga de los resultados filtrados ----------
+
+function isFiltered() {
+  const f = state.filters;
+  return Boolean(f.query.trim() || f.tag_ids.length || f.vigencia || f.solo_pendientes || f.solo_no_convenios);
+}
+
+// describeFilters resume el filtro activo: «Vencidos · Acapulco de Juárez».
+function describeFilters() {
+  const f = state.filters;
+  const parts = [];
+  if (f.vigencia) {
+    const opt = $(`#filter-vigencia option[value="${f.vigencia}"]`);
+    parts.push(opt ? opt.textContent.trim() : f.vigencia);
+  }
+  for (const id of f.tag_ids) {
+    const tag = state.tags.find(t => t.id === id);
+    if (tag) parts.push(tag.nombre);
+  }
+  if (f.solo_pendientes) parts.push('por clasificar');
+  if (f.solo_no_convenios) parts.push('no son convenios');
+  if (f.query.trim()) parts.push(`«${f.query.trim()}»`);
+  return parts.join(' · ');
+}
+
+function renderDownloadButton() {
+  const total = state.result.total || 0;
+  $('#download-wrap').hidden = total === 0;
+  if (!total) { closeDownloadMenu(); return; }
+  const plural = total === 1 ? '' : 's';
+  if (isFiltered()) {
+    $('#download-results-label').textContent = `Descargar filtrados (${total})`;
+    $('#download-menu-head').textContent = `${total} convenio${plural} con el filtro: ${describeFilters()}`;
+  } else {
+    $('#download-results-label').textContent = `Descargar todo (${total})`;
+    $('#download-menu-head').textContent = `Los ${total} convenio${plural} de la lista (sin archivados)`;
+  }
+}
+
+function toggleDownloadMenu(e) {
+  e?.stopPropagation();
+  const menu = $('#download-menu');
+  if (!menu.hidden) { closeDownloadMenu(); return; }
+  menu.hidden = false;
+  $('#btn-download-results').setAttribute('aria-expanded', 'true');
+  menu.querySelector('.menu__item')?.focus();
+}
+
+function closeDownloadMenu() {
+  const menu = $('#download-menu');
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  $('#btn-download-results').setAttribute('aria-expanded', 'false');
+}
+
+// downloadResults descarga todos los convenios que cumplen el filtro actual,
+// no solo los de la página visible: «csv» guarda la hoja y «pdf» los archivos.
+async function downloadResults(kind) {
+  closeDownloadMenu();
+  const f = Object.assign(emptyFilter(), state.filters, { page: 1, archivados: false });
+  if (kind === 'csv') {
+    await exportCSV([], f);
+    return;
+  }
+  try {
+    const r = await call('DownloadPDFsFiltered', f);
+    if (r && r.path) showToast(`${r.total} PDF guardado${r.total === 1 ? '' : 's'} en ${r.path}`, 'success');
+  } catch (err) {
+    showToast(errorText(err), 'error');
+  }
+}
+
+// ---------- Análisis completo con IA desde la lista ----------
+
+// analyzeWithAI hace todo el análisis de los convenios indicados: transcribe
+// las páginas escaneadas que falten, extrae los datos y revisa las dudas de
+// lectura. Usa la misma cola que la importación (con sus reintentos).
+async function analyzeWithAI(ids) {
+  ids = [...new Set(ids)].filter(id => id && !state.autoQueue.includes(id) && !state.autoActive.has(id));
+  if (!ids.length) {
+    showToast('Los convenios seleccionados ya se están analizando.', 'info');
+    return;
+  }
+  if (!state.config.ai_enabled || !state.config.has_api_key) {
+    const ok = await confirmDialog('La IA no está configurada', 'Para analizar convenios, activa la IA y guarda la clave del servicio en Ajustes.', 'Ir a Ajustes', false);
+    if (ok) navigate('ajustes');
+    return;
+  }
+  const items = (state.result.items || []).filter(c => ids.includes(c.id));
+  const busy = items.filter(isProcessing).map(c => c.id);
+  ids = ids.filter(id => !busy.includes(id));
+  if (!ids.length) {
+    showToast('Esos convenios ya se están procesando.', 'info');
+    return;
+  }
+  const analyzed = items.filter(c => ids.includes(c.id) && (c.ia_estado === 'ok' || c.ia_estado === 'parcial')).length;
+  if (analyzed) {
+    const intro = ids.length === 1
+      ? 'Este convenio ya tiene un análisis con IA.'
+      : `${analyzed} de los ${ids.length} convenios ya tienen un análisis con IA.`;
+    const ok = await confirmDialog('Volver a analizar', `${intro} Al analizar de nuevo, los datos capturados (dependencia, firmantes, fechas y notas) se reemplazan con lo que lea la IA. Las etiquetas que pusiste a mano se conservan.`, 'Analizar de nuevo', false);
+    if (!ok) return;
+  }
+  startAutoAI(ids);
+  showToast(ids.length === 1 ? 'Análisis con IA iniciado.' : `Análisis con IA iniciado para ${ids.length} convenios.`, 'info');
+  if (state.view === 'convenios') renderList();
+}
+
+// ---------- Archivados ----------
+
+// setArchived archiva (true) o devuelve a la lista principal (false). No se
+// pide confirmación porque se deshace con un clic.
+async function setArchived(ids, archived) {
+  ids = [...new Set(ids)].filter(Boolean);
+  if (!ids.length) return;
+  try {
+    const n = await call(archived ? 'ArchiveConvenios' : 'UnarchiveConvenios', ids);
+    const plural = n === 1 ? '' : 's';
+    showToast(archived
+      ? `${n} convenio${plural} archivado${plural}. Lo${plural} encuentras en Archivados.`
+      : `${n} convenio${plural} de vuelta en la lista principal.`, 'success');
+    ids.forEach(id => { state.selected.delete(id); state.arch.selected.delete(id); });
+    if (state.current && ids.includes(state.current.id)) {
+      state.current = await call('GetConvenio', state.current.id);
+      if (state.view === 'detalle') renderDetail();
+    }
+    await refreshData();
+    await loadList({ preserveSelection: true });
+    if (state.view === 'archivados') await loadArchived();
+  } catch (err) {
+    showToast(errorText(err), 'error');
+  }
+}
+
+function bindArchivedEvents() {
+  $('#arch-search').addEventListener('input', e => {
+    state.arch.query = e.target.value.trimStart();
+    state.arch.page = 1;
+    // Con búsqueda, lo más útil es la relevancia; sin ella, lo más reciente.
+    if (state.arch.query.trim() && state.arch.order === 'archivado_en') state.arch.order = 'relevancia';
+    if (!state.arch.query.trim() && state.arch.order === 'relevancia') state.arch.order = 'archivado_en';
+    $('#arch-sort').value = state.arch.order;
+    clearTimeout(state.arch.timer);
+    state.arch.timer = setTimeout(loadArchived, 240);
+  });
+  $('#btn-arch-search-clear').addEventListener('click', () => {
+    $('#arch-search').value = '';
+    state.arch.query = '';
+    state.arch.page = 1;
+    if (state.arch.order === 'relevancia') state.arch.order = 'archivado_en';
+    $('#arch-sort').value = state.arch.order;
+    loadArchived();
+    $('#arch-search').focus();
+  });
+  $('#arch-sort').addEventListener('change', e => {
+    state.arch.order = e.target.value;
+    state.arch.dir = e.target.value === 'dependencia' ? 'asc' : 'desc';
+    state.arch.page = 1;
+    loadArchived();
+  });
+  $('#btn-arch-csv').addEventListener('click', () => exportCSV([], archivedFilter()));
+  $('#btn-arch-restore').addEventListener('click', () => setArchived(Array.from(state.arch.selected), false));
+  $('#btn-arch-bulk-csv').addEventListener('click', () => exportCSV(Array.from(state.arch.selected)));
+  $('#btn-arch-bulk-pdf').addEventListener('click', () => downloadPDFs(Array.from(state.arch.selected)));
+  $('#btn-arch-bulk-clear').addEventListener('click', () => { state.arch.selected.clear(); renderArchived(); });
+  $('#arch-pagination').addEventListener('click', e => {
+    const btn = e.target.closest('[data-page]');
+    if (!btn || btn.disabled) return;
+    state.arch.page = Number(btn.dataset.page);
+    loadArchived().then(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
+  });
+  $('#arch-area').addEventListener('click', e => {
+    const restore = e.target.closest('[data-restore]');
+    if (restore) { e.stopPropagation(); setArchived([Number(restore.dataset.restore)], false); return; }
+    const download = e.target.closest('[data-download]');
+    if (download) { e.stopPropagation(); downloadPDF(Number(download.dataset.download)); return; }
+    const open = e.target.closest('[data-open-btn]');
+    if (open) { e.stopPropagation(); openDetail(Number(open.dataset.openBtn), 'archivados'); return; }
+    const row = e.target.closest('[data-open]');
+    if (row && !e.target.closest('input')) openDetail(Number(row.dataset.open), 'archivados');
+  });
+  $('#arch-area').addEventListener('change', e => {
+    if (e.target.id === 'arch-select-all') {
+      (state.arch.result.items || []).forEach(c => e.target.checked ? state.arch.selected.add(c.id) : state.arch.selected.delete(c.id));
+      renderArchived();
+      return;
+    }
+    const input = e.target.closest('[data-select]');
+    if (!input) return;
+    const id = Number(input.dataset.select);
+    if (input.checked) state.arch.selected.add(id); else state.arch.selected.delete(id);
+    input.closest('tr')?.classList.toggle('is-selected', input.checked);
+    syncArchivedSelection();
+  });
+}
+
+function archivedFilter() {
+  return Object.assign(emptyFilter(), {
+    query: state.arch.query, order: state.arch.order, dir: state.arch.dir,
+    page: state.arch.page, archivados: true
+  });
+}
+
+async function loadArchived() {
+  if (state.arch.loading) { state.arch.reload = true; return; }
+  state.arch.loading = true;
+  const area = $('#arch-area');
+  area.setAttribute('aria-busy', 'true');
+  try {
+    const res = await call('ListConvenios', archivedFilter());
+    state.arch.result = res;
+    const visible = new Set((res.items || []).map(c => c.id));
+    state.arch.selected = new Set([...state.arch.selected].filter(id => visible.has(id)));
+    renderArchived();
+  } catch (err) {
+    area.innerHTML = errorPanel(errorText(err));
+    showToast(errorText(err), 'error');
+  } finally {
+    state.arch.loading = false;
+    area.removeAttribute('aria-busy');
+    // Lo que se escribió mientras se cargaba la página anterior.
+    if (state.arch.reload) { state.arch.reload = false; loadArchived(); }
+  }
+}
+
+function renderArchived() {
+  const r = state.arch.result;
+  const items = r.items || [];
+  const query = state.arch.query.trim();
+  $('#btn-arch-search-clear').hidden = !state.arch.query;
+  $('#arch-approx').hidden = !(r.aproximado && items.length);
+  $('#btn-arch-csv').hidden = !items.length;
+  $('#arch-csv-label').textContent = query ? `Descargar CSV (${r.total})` : `Descargar CSV (${r.total_registrados})`;
+  $('#arch-summary').textContent = query
+    ? `${r.total} resultado${r.total === 1 ? '' : 's'} · ${r.total_registrados} archivado${r.total_registrados === 1 ? '' : 's'} en total`
+    : `${r.total_registrados} convenio${r.total_registrados === 1 ? '' : 's'} archivado${r.total_registrados === 1 ? '' : 's'}`;
+  const nav = $('#arch-pagination');
+  nav.innerHTML = (!r.total || r.pages <= 1) ? '' : `<button class="btn btn--outline btn--small" data-page="${r.page - 1}" ${r.page <= 1 ? 'disabled' : ''}>← Anterior</button>
+    <span>Página ${r.page} de ${r.pages}</span>
+    <button class="btn btn--outline btn--small" data-page="${r.page + 1}" ${r.page >= r.pages ? 'disabled' : ''}>Siguiente →</button>`;
+  const area = $('#arch-area');
+  if (!items.length) {
+    area.innerHTML = query ? `
+      <div class="empty-state empty-filter">
+        <h2>Ningún archivado coincide con «${esc(query)}»</h2>
+        <p>Prueba con otras palabras. Los convenios de la lista principal no se buscan aquí.</p>
+      </div>` : `
+      <div class="empty-state">
+        <div class="empty-state__art" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M3 4h18v5H3V4Z"/><path d="M5 9v11h14V9M10 13h4"/></svg>
+        </div>
+        <h2>No hay convenios archivados</h2>
+        <p>Para archivar, selecciona convenios en la lista y elige «Archivar», o usa el botón «Archivar» de su ficha. Archivar no borra nada.</p>
+      </div>`;
+    syncArchivedSelection();
+    return;
+  }
+  area.innerHTML = `<div class="table-wrap"><table class="data-table">
+    <thead><tr>
+      <th class="col-check"><input type="checkbox" class="checkbox" id="arch-select-all" aria-label="Seleccionar todos"></th>
+      <th>Dependencia</th>
+      <th>Firma</th>
+      <th>Vigencia</th>
+      <th>Estado</th>
+      <th>Archivado</th>
+      <th></th>
+    </tr></thead>
+    <tbody>${items.map(archRowHTML).join('')}</tbody>
+  </table></div>`;
+  syncArchivedSelection();
+}
+
+function archRowHTML(c) {
+  const selected = state.arch.selected.has(c.id);
+  const tags = (c.etiquetas || []).map(tag => chipHTML(tag)).join('');
+  const firmantes = [c.firmante_dependencia, c.firmante_uagro].filter(Boolean).map(esc).join(' · ');
+  return `<tr data-open="${c.id}" class="${selected ? 'is-selected' : ''}">
+    <td class="col-check"><input type="checkbox" class="checkbox row-check" data-select="${c.id}" ${selected ? 'checked' : ''} aria-label="Seleccionar ${esc(c.dependencia || c.archivo_nombre_original)}"></td>
+    <td class="cell-main">
+      <div class="dep-name">${esc(c.dependencia || 'Sin capturar')}</div>
+      ${firmantes ? `<div class="dep-meta" title="Firmantes">${firmantes}</div>` : ''}
+      <div class="dep-file" title="Archivo original: ${esc(c.archivo_nombre_original)}">${esc(c.archivo_nombre || c.archivo_nombre_original)}</div>
+      <div class="chips chip-list">${tags || '<span class="empty-chips">Sin etiquetas</span>'}</div>
+      ${snippetHTML(c.fragmento, state.arch.query)}
+    </td>
+    <td class="cell-date">${formatDate(c.fecha_firma) || '—'}</td>
+    <td class="cell-date">${c.vigencia_indefinida ? '<span class="muted">Indefinida</span>' : (formatDate(c.fecha_vigencia) || '—')}</td>
+    <td>${stateBadge(c.estado)}</td>
+    <td class="cell-archived">${formatDate(c.archivado_en) || '—'}</td>
+    <td class="cell-actions">
+      <button class="btn btn--text btn--small" data-download="${c.id}" title="Descargar PDF">PDF</button>
+      <button class="btn btn--text btn--small" data-restore="${c.id}" title="Regresarlo a la lista principal">Devolver</button>
+      <button class="btn btn--outline btn--small" data-open-btn="${c.id}">Abrir</button>
+    </td>
+  </tr>`;
+}
+
+function syncArchivedSelection() {
+  const count = state.arch.selected.size;
+  const all = state.arch.result.items || [];
+  const selectAll = $('#arch-select-all');
+  if (selectAll) {
+    selectAll.checked = count > 0 && count === all.length;
+    selectAll.indeterminate = count > 0 && count < all.length;
+  }
+  $('#arch-bulk').hidden = count === 0;
+  $('#arch-bulk-count').textContent = `${count} archivado${count === 1 ? '' : 's'} seleccionado${count === 1 ? '' : 's'}`;
 }
 
 async function importPackage(path) {

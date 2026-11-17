@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS convenios (
   -- 0: normal; 1: la IA cree que el archivo no es un convenio; 2: el usuario
   -- confirmó que sí lo es (la IA ya no lo vuelve a marcar).
   no_es_convenio          INTEGER NOT NULL DEFAULT 0,
+  -- Fecha en que el usuario lo archivó; NULL si está en la lista principal.
+  archivado_en            TEXT,
   firmante_dependencia    TEXT NOT NULL DEFAULT '',
   cargo_dependencia       TEXT NOT NULL DEFAULT '',
   firmante_uagro          TEXT NOT NULL DEFAULT '',

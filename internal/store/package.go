@@ -87,6 +87,9 @@ type PackageRecord struct {
 	// NoEsConvenio: 1 si la IA cree que no es un convenio, 2 si el usuario
 	// confirmó que sí lo es.
 	NoEsConvenio int `json:"no_es_convenio,omitempty"`
+	// ArchivadoEn conserva el archivado al llevar los convenios a otra
+	// instalación.
+	ArchivadoEn string `json:"archivado_en,omitempty"`
 }
 
 type packageManifest struct {
@@ -121,7 +124,7 @@ func (s *Store) packageRecords(ids []int64) ([]PackageRecord, map[string]string,
 		etiquetas_revisadas, transcripcion_estado, paginas_por_transcribir, paginas_transcritas, creado_en,
 		dependencia_corta, tipo_documento,
 		coalesce((SELECT n.archivo_sha256 FROM convenios n WHERE n.id = convenios.reemplazado_por), ''),
-		no_es_convenio
+		no_es_convenio, coalesce(archivado_en, '')
 		FROM convenios`+where+" ORDER BY id", args...)
 	if err != nil {
 		return nil, nil, err
@@ -138,7 +141,7 @@ func (s *Store) packageRecords(ids []int64) ([]PackageRecord, map[string]string,
 			&r.VigenciaIndefinida, &r.VigenciaCalculada, &r.VigenciaTexto, &r.Notas, &r.ArchivoNombreOriginal,
 			&saved, &r.ArchivoBytes, &r.ArchivoSHA256, &r.Paginas, &r.EsEscaneado, &r.TextoPDF, &r.IAEstado,
 			&r.EtiquetasRevisadas, &r.TranscripcionEstado, &r.PaginasPorTranscribir, &r.PaginasTranscritas, &r.CreadoEn,
-			&r.DependenciaCorta, &r.TipoDocumento, &r.ReemplazadoPorSHA, &r.NoEsConvenio); err != nil {
+			&r.DependenciaCorta, &r.TipoDocumento, &r.ReemplazadoPorSHA, &r.NoEsConvenio, &r.ArchivadoEn); err != nil {
 			rows.Close()
 			return nil, nil, err
 		}
@@ -523,15 +526,15 @@ func (s *Store) insertRecord(r PackageRecord, saved string) (int64, error) {
 			vigencia_calculada, notas, archivo_nombre_original, archivo_guardado, archivo_bytes,
 			archivo_sha256, paginas, es_escaneado, texto_pdf, texto, ia_estado, etiquetas_revisadas,
 			transcripcion_estado, paginas_por_transcribir, paginas_transcritas, creado_en, actualizado_en,
-			dependencia_corta, tipo_documento, no_es_convenio)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,?,?)`,
+			dependencia_corta, tipo_documento, no_es_convenio, archivado_en)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),?,?,?,?)`,
 		r.Dependencia, r.FirmanteDependencia, r.CargoDependencia, r.FirmanteUAGro, r.CargoUAGro,
 		r.Facultad, r.FacultadCiudad, nullIfEmpty(r.FechaFirma), nullIfEmpty(r.FechaVigencia),
 		boolInt(r.VigenciaIndefinida), r.VigenciaTexto, boolInt(r.VigenciaCalculada), r.Notas,
 		pdfutilName(r.ArchivoNombreOriginal), saved, r.ArchivoBytes, r.ArchivoSHA256, r.Paginas,
 		boolInt(r.EsEscaneado), r.TextoPDF, texto, r.IAEstado, boolInt(r.EtiquetasRevisadas),
 		r.TranscripcionEstado, r.PaginasPorTranscribir, r.PaginasTranscritas, r.CreadoEn,
-		cutRunes(cleanFileName(r.DependenciaCorta), 60), NormalizeTipoDocumento(r.TipoDocumento), noConvenioValue(r.NoEsConvenio))
+		cutRunes(cleanFileName(r.DependenciaCorta), 60), NormalizeTipoDocumento(r.TipoDocumento), noConvenioValue(r.NoEsConvenio), nullIfEmpty(r.ArchivadoEn))
 	if err != nil {
 		return 0, err
 	}

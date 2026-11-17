@@ -69,12 +69,12 @@ func (s *Store) retryRounds(id int64) (int, error) {
 // RetryCandidates devuelve los convenios que quedaron con «IA con error» o
 // con la transcripción incompleta (con error o interrumpida a la mitad) por
 // un fallo que puede resolverse reintentando, y suma una ronda a cada uno.
-// Los que ya agotaron MaxRetryRounds no se devuelven.
+// Los que ya agotaron MaxRetryRounds no se devuelven ni los archivados.
 func (s *Store) RetryCandidates() ([]int64, error) {
 	rows, err := s.db.Query(`SELECT id, ia_estado, ia_error, transcripcion_estado, transcripcion_error
 		FROM convenios
-		WHERE ia_estado = 'error' OR transcripcion_estado = 'error'
-		   OR (transcripcion_estado = 'pendiente' AND paginas_transcritas > 0)
+		WHERE archivado_en IS NULL AND (ia_estado = 'error' OR transcripcion_estado = 'error'
+		   OR (transcripcion_estado = 'pendiente' AND paginas_transcritas > 0))
 		ORDER BY id`)
 	if err != nil {
 		return nil, err

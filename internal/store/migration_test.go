@@ -145,6 +145,10 @@ func TestRepairIncompleteV6(t *testing.T) {
 		"ALTER TABLE convenios DROP COLUMN dependencia_corta",
 		"ALTER TABLE convenios DROP COLUMN tipo_documento",
 		"ALTER TABLE convenios DROP COLUMN huella",
+		// Una base v6 todavía no tiene el archivado (versión 7).
+		"DROP INDEX ix_convenios_archivado",
+		"ALTER TABLE convenios DROP COLUMN archivado_en",
+		"PRAGMA user_version=6",
 		// Disparador del índice de la versión 5 que quedó en la base.
 		`CREATE TRIGGER convenios_ai AFTER INSERT ON convenios BEGIN
 			INSERT INTO convenios_fts(rowid, dependencia, archivo_nombre_original, notas, texto)
@@ -170,5 +174,13 @@ func TestRepairIncompleteV6(t *testing.T) {
 		if res, err := st2.List(ListFilter{Query: q}); err != nil || res.Total != 1 {
 			t.Fatalf("búsqueda %q tras reparar: %+v %v", q, res.Total, err)
 		}
+	}
+	// Y la migración a la versión 7 agrega el archivado.
+	var version int
+	if err := st2.DB().QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 7 {
+		t.Fatalf("user_version = %d, %v", version, err)
+	}
+	if _, err := st2.SetArchived([]int64{id}, true); err != nil {
+		t.Fatalf("archivar tras migrar: %v", err)
 	}
 }
