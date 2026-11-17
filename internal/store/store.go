@@ -186,6 +186,12 @@ func Open(paths Paths) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	// Lo mismo con un análisis que se cortó al cerrar: queda como error para
+	// que se reintente (antes se quedaba «en análisis» para siempre).
+	if _, err := db.Exec("UPDATE convenios SET ia_estado='error', ia_error=? WHERE ia_estado='pendiente'", MsgAnalisisInterrumpido); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return st, nil
 }
 

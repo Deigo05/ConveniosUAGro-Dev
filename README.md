@@ -45,6 +45,8 @@ No hay que instalar un servidor ni iniciar sesión. Todo funciona en la PC.
 - Marca **«¿No es convenio?»** para archivos que la IA identifica como otro tipo de documento (actas, oficios, constancias), con su filtro en la lista.
 - Unificación de nombres con posibles errores de lectura en la transcripción y **revisión con la imagen** de los datos que el texto leyó de dos formas (firmantes, fechas).
 - **Aviso de actualizaciones** desde GitHub con instalación en un clic.
+- **Reintento automático**: las páginas y los archivos que fallan por un error pasajero del servicio de IA se reintentan solos, y al abrir la aplicación se vuelven a procesar los que quedaron con error o con la transcripción incompleta (retomando solo las páginas que faltan).
+- Las ciudades se guardan con el nombre oficial del municipio («Acapulco de Juárez», no «Acapulco»), así que no se duplican etiquetas.
 - Análisis opcional con IA para extraer dependencia, fechas y etiquetas desde PDF con texto.
 - Filtro para clasificar los convenios que aún no tienen etiquetas.
 - Aplicación de un solo usuario: sin login, sin cuentas y sin servidor propio.

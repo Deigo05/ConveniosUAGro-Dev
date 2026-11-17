@@ -193,3 +193,36 @@ func TestRelevantCorrections(t *testing.T) {
 		t.Fatalf("correcciones = %+v", got)
 	}
 }
+
+// La IA a veces responde el nombre corto del municipio: se cambia por el
+// oficial y, si ya está en el catálogo, deja de contar como ciudad nueva (así
+// tampoco dispara la búsqueda web).
+func TestValidateSuggestionsOfficialCityName(t *testing.T) {
+	catalogo := []Tag{
+		{Nombre: "Nacional", Tipo: "ambito"}, {Nombre: "Guerrero", Tipo: "estado"},
+		{Nombre: "Veracruz", Tipo: "estado"},
+		{Nombre: "Acapulco de Juárez", Tipo: "ciudad", Estado: "Guerrero"},
+	}
+	got := validateSuggestions([]interface{}{
+		map[string]interface{}{"tipo": "ciudad", "nombre": "Acapulco"},
+		map[string]interface{}{"tipo": "estado", "nombre": "Guerrero"},
+	}, catalogo)
+	if len(got) != 2 || got[0].Nombre != "Acapulco de Juárez" || got[0].Nueva {
+		t.Fatalf("sugerencias = %+v", got)
+	}
+	got = validateSuggestions([]interface{}{
+		map[string]interface{}{"tipo": "estado", "nombre": "Guerrero"},
+		map[string]interface{}{"tipo": "ciudad", "nombre": "Iguala"},
+	}, catalogo)
+	if got[1].Nombre != "Iguala de la Independencia" || !got[1].Nueva {
+		t.Fatalf("ciudad nueva = %+v", got[1])
+	}
+	// Con otro estado el nombre no se toca.
+	got = validateSuggestions([]interface{}{
+		map[string]interface{}{"tipo": "estado", "nombre": "Veracruz"},
+		map[string]interface{}{"tipo": "ciudad", "nombre": "Acapulco"},
+	}, catalogo)
+	if got[1].Nombre != "Acapulco" {
+		t.Fatalf("ciudad de otro estado = %+v", got[1])
+	}
+}

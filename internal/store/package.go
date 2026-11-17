@@ -481,6 +481,9 @@ func (s *Store) insertRecord(r PackageRecord, saved string) (int64, error) {
 		if t.Tipo != "tema" && seenType[t.Tipo] {
 			continue
 		}
+		if t.Tipo == "ciudad" {
+			t.Nombre, t.Estado = officialCity(t.Nombre, t.Estado)
+		}
 		tag, ok, err := s.findTag(t.Tipo, t.Nombre)
 		if err != nil {
 			return 0, err

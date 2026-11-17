@@ -531,7 +531,11 @@ func (s *Store) SetAIResult(id int64, in ConventionInput, estado string, sugeren
 		nullIfEmpty(in.FechaFirma), nullIfEmpty(in.FechaVigencia),
 		boolInt(in.VigenciaIndefinida), boolInt(in.VigenciaCalculada), strings.TrimSpace(in.VigenciaTexto),
 		strings.TrimSpace(in.Notas+" "+notas), estado, data, id)
-	return err
+	if err != nil {
+		return err
+	}
+	// El análisis salió bien: se reinicia la cuenta de reintentos automáticos.
+	return s.ClearRetries(id)
 }
 
 // jsonMarshal is a small indirection to keep the import list tidy.

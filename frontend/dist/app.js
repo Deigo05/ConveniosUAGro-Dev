@@ -72,6 +72,7 @@ async function init() {
     applyBootstrap(b);
     await loadList();
     setupRuntime();
+    retryFailedOnStart();
     if (state.config.update_check !== false) {
       setTimeout(() => checkForUpdates(false), 4000);
       setInterval(() => checkForUpdates(false), UPDATE_INTERVAL_MS);
@@ -1301,6 +1302,49 @@ function renderAIActivity() {
   setAIActivity(text);
 }
 
+// Reintentos automáticos. Un error pasajero (servicio saturado, tiempo
+// agotado, red, respuesta cortada) se reintenta con espera creciente: cada
+// página hasta 2 veces más y cada archivo completo hasta 2 veces más. Los
+// errores que no se arreglan reintentando (clave inválida, PDF sin texto) no
+// se repiten; la lista vive en Go (RetryableError).
+const PAGE_RETRY_DELAYS_MS = [5000, 15000];
+const FILE_RETRY_DELAYS_MS = [30000, 90000];
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function isRetryable(err) {
+  try { return Boolean(await call('RetryableError', errorText(err))); } catch (_) { return false; }
+}
+
+// withRetries ejecuta fn y, si falla con un error pasajero, la repite tras
+// cada espera de delays. onRetry recibe el número de reintento y el error.
+async function withRetries(fn, delays, onRetry) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn(attempt);
+    } catch (err) {
+      if (attempt >= delays.length || !await isRetryable(err)) throw err;
+      if (onRetry) onRetry(attempt + 1, err);
+      await sleep(delays[attempt]);
+    }
+  }
+}
+
+// Al abrir la aplicación se reintentan los convenios que quedaron con «IA con
+// error» o con la transcripción incompleta. Go limita a 3 aperturas seguidas
+// por convenio para no gastar sin fin en uno que siempre falla.
+async function retryFailedOnStart() {
+  if (!state.config.ai_enabled || !state.config.has_api_key) return;
+  try {
+    const ids = await call('RetryCandidates');
+    if (!ids || !ids.length) return;
+    showToast(`Reintentando ${ids.length} convenio${ids.length === 1 ? '' : 's'} con error de IA o transcripción incompleta.`, 'info');
+    startAutoAI(ids);
+  } catch (err) {
+    console.error(err);
+  }
+}
+
 // Las páginas escaneadas de todos los documentos comparten un mismo cupo de
 // envíos simultáneos.
 const pageSlots = { free: PAGES_AT_ONCE, waiting: [] };
@@ -1320,10 +1364,22 @@ function releasePageSlot() {
 }
 
 async function processAutoFile(id) {
+  try {
+    await withRetries(() => processAutoFileOnce(id), FILE_RETRY_DELAYS_MS, n => {
+      setDocActivity(id, `IA: reintentando un archivo con error (${n} de ${FILE_RETRY_DELAYS_MS.length})…`);
+    });
+  } finally {
+    setDocActivity(id, '');
+  }
+}
+
+async function processAutoFileOnce(id) {
   let c = await call('GetConvenio', id);
   if (!state.config.ai_enabled) return;
-  const necesitaTranscripcion = (c.es_escaneado && c.transcripcion_estado !== 'completa') ||
-    Number(c.paginas_por_transcribir || 0) > 0;
+  // Una transcripción completa no se repite (antes se repetía si el PDF
+  // tenía páginas escaneadas, y un reintento la volvía a pagar entera).
+  const necesitaTranscripcion = c.transcripcion_estado !== 'completa' &&
+    (c.es_escaneado || Number(c.paginas_por_transcribir || 0) > 0);
   let transcrito = false;
   if (necesitaTranscripcion) {
     await transcribeConvention(id, { auto: true });
@@ -1334,6 +1390,9 @@ async function processAutoFile(id) {
     setDocActivity(id, 'IA: extrayendo datos…');
     try {
       await call('ExtractAI', id);
+      // Un reintento después de transcribir llega por aquí: también revisa
+      // las dudas de lectura (si no hay páginas transcritas no hace nada).
+      await verifyDoubts(id);
     } finally {
       setDocActivity(id, '');
     }
@@ -1406,6 +1465,9 @@ async function transcribeConvention(id, options = {}) {
   state.transcribing.add(id);
   let pdf;
   let paginas = [];
+  // transcribed indica que ya se guardaron todas las páginas: si después falla
+  // la extracción, la transcripción no se marca como incompleta.
+  let transcribed = false;
   try {
     pdf = await window.pdfjsLib.getDocument({ url: `/pdf/${id}` }).promise;
     for (let i = 1; i <= pdf.numPages; i++) {
@@ -1418,30 +1480,45 @@ async function transcribeConvention(id, options = {}) {
       if (!auto) showToast('No se encontraron páginas escaneadas para transcribir.', 'info');
       return;
     }
+    // Una transcripción incompleta se retoma: solo se envían las páginas que
+    // faltan. «Volver a transcribir» una completa empieza de cero.
+    const previa = await call('GetTranscription', id);
+    const retomar = previa.estado !== 'completa' && Number(previa.paginas_transcritas || 0) > 0;
     if (options.confirm) {
+      const n = retomar ? Math.max(paginas.length - Number(previa.paginas_transcritas || 0), 0) : paginas.length;
       const ok = await confirmDialog(
         'Transcribir páginas escaneadas',
-        `Se enviarán ${paginas.length} página${paginas.length === 1 ? '' : 's'} al servicio externo de IA. Puede tardar y generar costo en su proveedor. El texto se agregará a la búsqueda. ¿Continuar?`,
+        `Se enviarán ${n} página${n === 1 ? '' : 's'} al servicio externo de IA${retomar ? ' (las ya transcritas se conservan)' : ''}. Puede tardar y generar costo en su proveedor. El texto se agregará a la búsqueda. ¿Continuar?`,
         'Transcribir',
         false
       );
       if (!ok) return;
     }
-    await call('BeginTranscription', id, paginas.length);
+    let pendientes = paginas;
+    if (retomar) {
+      const hechas = new Set(await call('ResumeTranscription', id, paginas.length));
+      pendientes = paginas.filter(p => !hechas.has(p));
+    } else {
+      await call('BeginTranscription', id, paginas.length);
+    }
     if (state.current?.id === id) {
       state.current.transcripcion_estado = 'en_proceso';
       state.current.paginas_por_transcribir = paginas.length;
-      state.current.paginas_transcritas = 0;
+      state.current.paginas_transcritas = paginas.length - pendientes.length;
       renderTranscription();
     }
-    setDocActivity(id, `IA: transcribiendo 0/${paginas.length}`);
+    setDocActivity(id, `IA: transcribiendo ${paginas.length - pendientes.length}/${paginas.length}`);
     let failed = null;
     const transcribePage = async pageNumber => {
       await acquirePageSlot();
       try {
         if (failed) return;
         const base64 = await renderPageJPEG(pdf, pageNumber, 1600, 1.45, 0.82);
-        const status = await call('TranscribePage', id, pageNumber, base64);
+        const status = await withRetries(
+          () => call('TranscribePage', id, pageNumber, base64),
+          PAGE_RETRY_DELAYS_MS,
+          n => setDocActivity(id, `IA: reintentando la página ${pageNumber} (${n} de ${PAGE_RETRY_DELAYS_MS.length})…`)
+        );
         if (state.current?.id === id) {
           state.current.paginas_transcritas = status.paginas_transcritas;
           state.current.paginas_por_transcribir = status.paginas_por_transcribir;
@@ -1457,9 +1534,10 @@ async function transcribeConvention(id, options = {}) {
         releasePageSlot();
       }
     };
-    await Promise.all(paginas.map(transcribePage));
+    await Promise.all(pendientes.map(transcribePage));
     if (failed) throw failed;
     await call('FinishTranscription', id);
+    transcribed = true;
     if (state.current?.id === id) {
       state.current = await call('GetConvenio', id);
       renderDetail();
@@ -1479,11 +1557,15 @@ async function transcribeConvention(id, options = {}) {
         await loadList({ preserveSelection: true });
         if (!auto) showToast('Transcripción completa. Datos extraídos automáticamente.', 'success');
       } catch (err) {
+        // En la cola automática el error sube para que se reintente el archivo.
+        if (auto) throw err;
         showToast('Transcripción completa, pero la extracción automática falló: ' + errorText(err), 'error');
       }
     }
   } catch (err) {
-    try { await call('FailTranscription', id, errorText(err)); } catch (_) {}
+    if (!transcribed) {
+      try { await call('FailTranscription', id, errorText(err)); } catch (_) {}
+    }
     if (state.current?.id === id) {
       try { state.current = await call('GetConvenio', id); renderDetail(); } catch (_) {}
     }
