@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode"
 
+	"convenios-uagro-desktop/internal/municipios"
 	"convenios-uagro-desktop/internal/uagro"
 
 	"golang.org/x/text/unicode/norm"
@@ -971,7 +972,34 @@ func validateSuggestions(v interface{}, catalogo []Tag) []Suggestion {
 			break
 		}
 	}
+	officialCityNames(out, byType["ciudad"])
 	return out
+}
+
+// officialCityNames cambia el nombre corto de un municipio por el oficial
+// («Acapulco» → «Acapulco de Juárez») para no crear dos etiquetas de la misma
+// ciudad. Usa el estado sugerido para no confundir municipios homónimos.
+func officialCityNames(list []Suggestion, cities map[string]string) {
+	estado := ""
+	for _, s := range list {
+		if s.Tipo == "estado" {
+			estado = s.Nombre
+		}
+	}
+	for i := range list {
+		if list[i].Tipo != "ciudad" {
+			continue
+		}
+		oficial, _, ok := municipios.Oficial(list[i].Nombre, estado)
+		if !ok {
+			continue
+		}
+		if real, exists := cities[key(oficial)]; exists {
+			list[i].Nombre, list[i].Nueva = real, false
+		} else {
+			list[i].Nombre, list[i].Nueva = oficial, true
+		}
+	}
 }
 
 func key(s string) string {

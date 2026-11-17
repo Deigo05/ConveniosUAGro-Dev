@@ -122,6 +122,9 @@ func (s *Store) CreateTag(in TagInput) (Tag, error) {
 			return Tag{}, errors.New("el estado de la ciudad no es válido")
 		}
 	}
+	if tipo == "ciudad" {
+		nombre, estado = officialCity(nombre, estado)
+	}
 	var existe int
 	if err := s.db.QueryRow("SELECT count(*) FROM etiquetas WHERE tipo=? AND nombre=?", tipo, nombre).Scan(&existe); err != nil {
 		return Tag{}, err
@@ -146,6 +149,9 @@ func (s *Store) EnsureTag(tipo, nombre string) (Tag, error) {
 // ensureTag busca la etiqueta (sin distinguir acentos) o la crea. Tolera que
 // dos análisis simultáneos la creen a la vez.
 func (s *Store) ensureTag(tipo, nombre, estado string) (Tag, error) {
+	if tipo == "ciudad" {
+		nombre, estado = officialCity(nombre, estado)
+	}
 	if tag, ok, err := s.findTag(tipo, nombre); err != nil || ok {
 		return tag, err
 	}
@@ -190,6 +196,7 @@ func (s *Store) UpdateTag(in TagInput) error {
 				return errors.New("el estado de la ciudad no es válido")
 			}
 		}
+		nombre, estado = officialCity(nombre, estado)
 	}
 	var otra int
 	if err := s.db.QueryRow("SELECT count(*) FROM etiquetas WHERE tipo=? AND nombre=? AND id<>?", tipo, nombre, in.ID).Scan(&otra); err != nil {
@@ -546,6 +553,8 @@ func (s *Store) findCity(nombre, estado string) (Tag, error) {
 	if err != nil {
 		return Tag{}, err
 	}
+	// «Acapulco» y «Acapulco de Juárez» son la misma ciudad.
+	nombre, _ = officialCity(nombre, estado)
 	key, estKey := NormalizeKey(nombre), NormalizeKey(estado)
 	var same, stateless, other *Tag
 	for i := range tags {

@@ -120,7 +120,9 @@ func TestExtractSignatoriesFacultyAndFacultyTag(t *testing.T) {
 	if !res.EtiquetasRevisadas || len(res.EtiquetasSugeridas) != 0 {
 		t.Fatalf("las sugerencias no se aplicaron automáticamente: %+v", res)
 	}
-	for _, name := range []string{"Nacional", "Guerrero", "Acapulco"} {
+	// La IA respondió «Acapulco»: la ciudad se guarda con su nombre oficial
+	// para no duplicar la etiqueta «Acapulco de Juárez».
+	for _, name := range []string{"Nacional", "Guerrero", "Acapulco de Juárez"} {
 		found := false
 		for _, tag := range tags {
 			if tag.Nombre == name {

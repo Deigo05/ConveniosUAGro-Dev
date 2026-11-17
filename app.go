@@ -30,7 +30,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.2.3"
+const appVersion = "1.2.4"
 
 // buildCommit y buildDate se fijan al compilar en GitHub Actions con
 // -ldflags "-X main.buildCommit=<sha> -X main.buildDate=<RFC3339>". En una
@@ -120,6 +120,7 @@ func (a *App) startup(ctx context.Context) {
 	if err := a.store.BackfillCityStates(); err != nil {
 		log.Printf("no se pudo asignar el estado de las ciudades: %v", err)
 	}
+	a.unifyCityNames()
 	a.repairFacultyTags()
 	a.repairRequiredTags()
 	a.markOpenAgreements()
@@ -129,6 +130,18 @@ func (a *App) startup(ctx context.Context) {
 		wailsruntime.EventsEmit(ctx, "duplicates:refreshed")
 	}()
 	go cleanupOldExecutable()
+}
+
+// unifyCityNames deja una sola etiqueta por municipio: «Acapulco» pasa a
+// «Acapulco de Juárez» (y lo mismo con otros nombres cortos de municipios).
+func (a *App) unifyCityNames() {
+	n, err := a.store.UnifyCityNames()
+	if err != nil {
+		log.Printf("no se pudieron unificar los nombres de ciudad: %v", err)
+	}
+	if n > 0 {
+		log.Printf("se unificaron %d etiquetas de ciudad con su nombre oficial", n)
+	}
 }
 
 // refreshDuplicates recalcula las marcas de duplicados y renovaciones.
@@ -265,8 +278,8 @@ func (a *App) ChoosePDFs() ([]string, error) {
 	})
 }
 
-// ImportPDFs copia y registra los PDF seleccionados. No usa IA automáticamente:
-// el usuario puede extraer los datos desde la ficha.
+// ImportPDFs copia y registra los PDF seleccionados. El análisis con IA lo
+// lanza después la interfaz, con la cola automática.
 func (a *App) ImportPDFs(paths []string) []ImportResult {
 	if len(paths) > 60 {
 		paths = paths[:60]
@@ -920,6 +933,40 @@ func (a *App) BeginTranscription(id int64, total int) error {
 	return a.store.BeginTranscription(id, total)
 }
 
+// ResumeTranscription retoma una transcripción incompleta sin borrar lo ya
+// transcrito y devuelve las páginas que ya están listas.
+func (a *App) ResumeTranscription(id int64, total int) ([]int, error) {
+	a.cfgMu.Lock()
+	cfg := a.cfg
+	a.cfgMu.Unlock()
+	if !cfg.AIEnabled || cfg.APIKey == "" {
+		return nil, errors.New("configure y active la IA antes de transcribir")
+	}
+	return a.store.ResumeTranscription(id, total)
+}
+
+// RetryCandidates devuelve los convenios con «IA con error» o con la
+// transcripción incompleta que conviene reintentar al abrir la aplicación.
+// Cada uno se reintenta como máximo store.MaxRetryRounds veces seguidas.
+func (a *App) RetryCandidates() ([]int64, error) {
+	a.cfgMu.Lock()
+	cfg := a.cfg
+	a.cfgMu.Unlock()
+	if !cfg.AIEnabled || cfg.APIKey == "" {
+		return []int64{}, nil
+	}
+	ids, err := a.store.RetryCandidates()
+	if ids == nil {
+		ids = []int64{}
+	}
+	return ids, err
+}
+
+// RetryableError indica si vale la pena reintentar después de ese error.
+func (a *App) RetryableError(msg string) bool {
+	return store.RetryableError(msg)
+}
+
 // TranscribePage envía una imagen renderizada al modelo de visión y guarda el texto.
 func (a *App) TranscribePage(id int64, page int, imageBase64 string) (store.TranscriptionStatus, error) {
 	a.cfgMu.Lock()
@@ -934,7 +981,8 @@ func (a *App) TranscribePage(id int64, page int, imageBase64 string) (store.Tran
 	defer cancel()
 	texto, err := client.TranscribeImage(ctx, imageBase64, page)
 	if err != nil {
-		_ = a.store.FailTranscription(id, err.Error())
+		// No se marca la transcripción como fallida: la interfaz reintenta la
+		// página y, si se agotan los intentos, llama a FailTranscription.
 		return store.TranscriptionStatus{}, err
 	}
 	return a.store.SaveTranscriptionPage(id, page, texto)
@@ -1137,6 +1185,7 @@ func (a *App) ImportConvenios(path string) (store.ImportSummary, error) {
 	if err != nil {
 		return sum, err
 	}
+	a.unifyCityNames()
 	a.repairFacultyTags()
 	a.markOpenAgreements()
 	a.refreshDuplicates()

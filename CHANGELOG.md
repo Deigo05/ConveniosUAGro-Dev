@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.2.4] - 2026-11-17
+
+Parche de correcciones.
+
+### Corregido
+
+- **Una sola etiqueta por municipio**: la IA a veces escribía el nombre corto del municipio y se creaban dos etiquetas de la misma ciudad, como «Acapulco» y «Acapulco de Juárez». Ahora las ciudades se guardan siempre con su nombre oficial y, al abrir la aplicación, los convenios que tenían la etiqueta corta pasan a la oficial y la corta se elimina. Se unifican Acapulco → Acapulco de Juárez, Chilpancingo → Chilpancingo de los Bravo, Iguala → Iguala de la Independencia, Taxco → Taxco de Alarcón, Zihuatanejo → Zihuatanejo de Azueta, Tlapa → Tlapa de Comonfort, Tixtla → Tixtla de Guerrero y Ayutla → Ayutla de los Libres (este último solo si consta que es de Guerrero, porque también hay un Ayutla en Jalisco). También aplica a variantes como «Acapulco, Gro.» y a las ciudades que se crean a mano o llegan en un paquete importado.
+- **Reintento automático de «IA con error» y «Transcripción incompleta»**:
+  - Una página escaneada que falla por un error pasajero (servicio saturado, tiempo agotado, red, respuesta cortada) se reintenta hasta 2 veces, a los 5 y 15 segundos.
+  - Si un archivo completo falla en la cola automática, se reintenta hasta 2 veces más, a los 30 y 90 segundos.
+  - Al abrir la aplicación se vuelven a procesar los convenios que quedaron con error. Cada convenio se reintenta como máximo en 3 aperturas seguidas, para no gastar sin fin en uno que siempre falla; la cuenta se reinicia cuando el análisis sale bien.
+  - Los errores que no se arreglan reintentando (clave de IA inválida, PDF sin texto, IA desactivada) no se repiten.
+- Una transcripción incompleta se retoma desde donde se quedó: solo se envían las páginas que faltan, en vez de volver a pagar las que ya estaban transcritas. «Volver a transcribir» una completa sigue empezando de cero.
+- Si la extracción fallaba después de una transcripción completa, la transcripción quedaba marcada como incompleta. Ahora solo se reintenta la extracción.
+- La cola automática ya no vuelve a transcribir un documento que ya tenía la transcripción completa.
+- Un análisis interrumpido al cerrar la aplicación se quedaba «en análisis» para siempre; ahora queda como error y se reintenta al abrirla.
+
 ## [1.2.3] - 2026-10-24
 
 ### Corregido
