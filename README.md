@@ -31,6 +31,9 @@ No hay que instalar un servidor ni iniciar sesión. Todo funciona en la PC.
 - Búsqueda de texto completo dentro del PDF y de los datos capturados.
 - Filtros por etiquetas y por vigencia; columna de estado (vigente, por vencer, vencido, indefinida, sin fecha).
 - Selección múltiple y eliminación en lote.
+- **Descarga de los convenios filtrados** (por ejemplo, solo los vencidos o los de una etiqueta) en CSV o como PDF en una carpeta.
+- **Archivados**: los convenios que el usuario archiva salen de la lista principal y de su buscador, y se consultan en su propia sección, con su propio buscador. Se pueden devolver a la lista en cualquier momento.
+- Botón **«Analizar con IA»** en cada convenio de la lista (y para varios seleccionados) que hace todo el análisis: transcripción, extracción de datos y revisión de dudas.
 - Visor de PDF integrado y **descarga del PDF** con diálogo Guardar como, con un **nombre útil** aunque el archivo se haya subido como «Escaner123515.pdf»: `AAAA-MM-DD Tipo - Contraparte - Facultad.pdf`. También se pueden descargar varios a una carpeta.
 - **Transcripción de páginas escaneadas** con el modelo de visión del servicio externo; el texto se guarda por página y se integra a la búsqueda.
 - Si la IA está activa, la extracción y la transcripción **comienzan automáticamente al confirmar la importación**. También se extraen los datos al terminar una transcripción manual.

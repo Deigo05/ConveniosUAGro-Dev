@@ -76,3 +76,4 @@ END;
 -- Índice sobre una columna que agregan las migraciones (por eso va aquí y no
 -- en schema.sql, que se ejecuta antes de migrar).
 CREATE INDEX IF NOT EXISTS ix_convenios_reemplazado ON convenios(reemplazado_por);
+CREATE INDEX IF NOT EXISTS ix_convenios_archivado ON convenios(archivado_en);

@@ -594,9 +594,10 @@ func (s *Store) findCity(nombre, estado string) (Tag, error) {
 	return s.ensureTag("ciudad", nombre, estado)
 }
 
-// AcceptSuggestions convierte las sugerencias en etiquetas reales. Las ciudades
-// nuevas se crean con el estado sugerido; ámbito, estado y tema solo se
-// aceptan si ya existen. Los conflictos de ubicación se corrigen solos.
+// AcceptSuggestions convierte las sugerencias en etiquetas reales y conserva
+// las que ya tenía el convenio y la IA no reemplaza. Las ciudades nuevas se
+// crean con el estado sugerido; ámbito, estado y tema solo se aceptan si ya
+// existen. Los conflictos de ubicación se corrigen solos.
 func (s *Store) AcceptSuggestions(convenioID int64) error {
 	var raw string
 	if err := s.db.QueryRow("SELECT etiquetas_sugeridas FROM convenios WHERE id=?", convenioID).Scan(&raw); err != nil {
@@ -639,6 +640,32 @@ func (s *Store) AcceptSuggestions(convenioID int64) error {
 			return err
 		}
 		ids = append(ids, tag.ID)
+	}
+	// Lo que la IA no sugirió se conserva: un nuevo análisis no debe borrar
+	// las etiquetas puestas a mano. Los temas se suman; ámbito y facultad se
+	// conservan si la IA no trae uno; estado y ciudad van juntos, así que se
+	// conservan solo si la IA no sugirió ninguno de los dos.
+	suggested := map[string]bool{}
+	for _, sug := range sugs {
+		suggested[sug.Tipo] = true
+	}
+	current, err := s.TagsForConvention(convenioID)
+	if err != nil {
+		return err
+	}
+	for _, t := range current {
+		keep := false
+		switch t.Tipo {
+		case "tema":
+			keep = true
+		case "estado", "ciudad":
+			keep = !suggested["estado"] && !suggested["ciudad"]
+		default:
+			keep = !suggested[t.Tipo]
+		}
+		if keep {
+			ids = append(ids, t.ID)
+		}
 	}
 	final, err := s.consistentTags(ids, false)
 	if err != nil {

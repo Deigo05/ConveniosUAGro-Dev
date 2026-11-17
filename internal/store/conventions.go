@@ -237,6 +237,10 @@ func (s *Store) list(f ListFilter, fts string) (ListResult, error) {
 		conds = append(conds, "c.no_es_convenio=1")
 	}
 	limit := pageSize
+	archivo := "c.archivado_en IS NULL"
+	if f.Archivados {
+		archivo = "c.archivado_en IS NOT NULL"
+	}
 	if len(f.ids) > 0 {
 		ph := strings.TrimRight(strings.Repeat("?,", len(f.ids)), ",")
 		conds = append(conds, "c.id IN ("+ph+")")
@@ -244,9 +248,12 @@ func (s *Store) list(f ListFilter, fts string) (ListResult, error) {
 			args = append(args, id)
 		}
 		limit, f.Page = len(f.ids), 1
-	} else if !f.IncluirAnteriores {
-		// Las versiones anteriores solo se ven en el historial de la vigente.
-		conds = append(conds, "c.reemplazado_por IS NULL")
+	} else {
+		conds = append(conds, archivo)
+		if !f.IncluirAnteriores {
+			// Las versiones anteriores solo se ven en el historial de la vigente.
+			conds = append(conds, "c.reemplazado_por IS NULL")
+		}
 	}
 
 	where := " WHERE " + strings.Join(conds, " AND ")
@@ -255,7 +262,7 @@ func (s *Store) list(f ListFilter, fts string) (ListResult, error) {
 		return ListResult{}, err
 	}
 	var totalRegistrados int
-	if err := s.db.QueryRow("SELECT count(*) FROM convenios WHERE reemplazado_por IS NULL").Scan(&totalRegistrados); err != nil {
+	if err := s.db.QueryRow("SELECT count(*) FROM convenios c WHERE c.reemplazado_por IS NULL AND " + archivo).Scan(&totalRegistrados); err != nil {
 		return ListResult{}, err
 	}
 	pages := (total + limit - 1) / limit
@@ -287,7 +294,7 @@ func (s *Store) list(f ListFilter, fts string) (ListResult, error) {
 		c.es_escaneado, c.ia_estado, c.ia_error, c.etiquetas_revisadas,
 		c.transcripcion_estado, c.transcripcion_error, c.paginas_por_transcribir,
 		c.paginas_transcritas, c.creado_en, c.actualizado_en, c.dependencia_corta, c.tipo_documento,
-		coalesce(c.reemplazado_por, 0), c.no_es_convenio=1`
+		coalesce(c.reemplazado_por, 0), c.no_es_convenio=1, coalesce(c.archivado_en, '')`
 	if fts != "" {
 		// char(2) y char(3) marcan la coincidencia; la interfaz los resalta.
 		query += `, snippet(convenios_fts, -1, char(2), char(3), '…', 14)`
@@ -313,7 +320,7 @@ func (s *Store) list(f ListFilter, fts string) (ListResult, error) {
 			&indef, &calc, &c.ArchivoNombreOriginal, &c.Paginas, &scanned,
 			&c.IAEstado, &c.IAError, &revisadas, &c.TranscripcionEstado,
 			&c.TranscripcionError, &c.PaginasPorTranscribir, &c.PaginasTranscritas,
-			&c.CreadoEn, &c.ActualizadoEn, &c.DependenciaCorta, &c.TipoDocumento, &c.ReemplazadoPor, &c.NoEsConvenio, &c.Fragmento); err != nil {
+			&c.CreadoEn, &c.ActualizadoEn, &c.DependenciaCorta, &c.TipoDocumento, &c.ReemplazadoPor, &c.NoEsConvenio, &c.ArchivadoEn, &c.Fragmento); err != nil {
 			return ListResult{}, err
 		}
 		c.VigenciaIndefinida = indef != 0
@@ -357,6 +364,8 @@ func orderSQL(order, dir string) string {
 		return "(c.fecha_firma IS NULL OR c.fecha_firma='') ASC, c.fecha_firma " + sentido + ", c.id DESC"
 	case "fecha_vigencia":
 		return "(c.fecha_vigencia IS NULL OR c.fecha_vigencia='') ASC, c.fecha_vigencia " + sentido + ", c.id DESC"
+	case "archivado_en":
+		return "c.archivado_en " + sentido + ", c.id DESC"
 	case "id":
 		return "c.id " + sentido
 	default:
@@ -401,7 +410,7 @@ func (s *Store) Get(id int64) (ConventionDetail, error) {
 		       texto_pdf, texto, ia_estado, ia_error, etiquetas_sugeridas, etiquetas_revisadas,
 		       transcripcion_estado, transcripcion_error, paginas_por_transcribir,
 		       paginas_transcritas, creado_en, actualizado_en, dependencia_corta, tipo_documento,
-		       coalesce(reemplazado_por, 0), no_es_convenio=1
+		       coalesce(reemplazado_por, 0), no_es_convenio=1, coalesce(archivado_en, '')
 		FROM convenios WHERE id=?`, id).Scan(
 		&c.ID, &c.Dependencia, &c.FirmanteDependencia, &c.CargoDependencia, &c.FirmanteUAGro,
 		&c.CargoUAGro, &c.Facultad, &c.FacultadCiudad, &fechaFirma, &fechaVigencia, &indef,
@@ -409,7 +418,7 @@ func (s *Store) Get(id int64) (ConventionDetail, error) {
 		&c.ArchivoGuardado, &c.ArchivoBytes, &c.ArchivoSHA256, &c.Paginas, &scanned,
 		&textoPDF, &c.Texto, &c.IAEstado, &c.IAError, &sugerenciasRaw, &revisadas,
 		&c.TranscripcionEstado, &c.TranscripcionError, &c.PaginasPorTranscribir,
-		&c.PaginasTranscritas, &c.CreadoEn, &c.ActualizadoEn, &c.DependenciaCorta, &c.TipoDocumento, &c.ReemplazadoPor, &c.NoEsConvenio)
+		&c.PaginasTranscritas, &c.CreadoEn, &c.ActualizadoEn, &c.DependenciaCorta, &c.TipoDocumento, &c.ReemplazadoPor, &c.NoEsConvenio, &c.ArchivadoEn)
 	if errors.Is(err, sql.ErrNoRows) {
 		return c, errors.New("el convenio no existe")
 	}
@@ -615,7 +624,7 @@ func (s *Store) Stats() (Stats, error) {
 		       coalesce(sum(CASE WHEN vigencia_indefinida=0 AND (fecha_vigencia IS NULL OR fecha_vigencia='') THEN 1 ELSE 0 END),0),
 		       coalesce(sum(CASE WHEN vigencia_indefinida=1 THEN 1 ELSE 0 END),0),
 		       coalesce(sum(CASE WHEN etiquetas_revisadas=0 THEN 1 ELSE 0 END),0)
-		FROM convenios WHERE reemplazado_por IS NULL`, today, today, today, today).Scan(
+		FROM convenios WHERE reemplazado_por IS NULL AND archivado_en IS NULL`, today, today, today, today).Scan(
 		&st.Total, &st.Vigentes, &st.PorVencer, &st.Vencidos, &st.SinFecha,
 		&st.Indefinidas, &st.EtiquetasPendientes)
 	if err != nil {
@@ -627,8 +636,9 @@ func (s *Store) Stats() (Stats, error) {
 	if err := s.db.QueryRow(`SELECT (SELECT count(*) FROM convenios WHERE reemplazado_por IS NOT NULL),
 		(SELECT count(*) FROM convenio_duplicados WHERE motivo <> 'renovacion'),
 		(SELECT count(*) FROM convenio_duplicados WHERE motivo = 'renovacion'),
-		(SELECT count(*) FROM convenios WHERE no_es_convenio = 1)`).Scan(
-		&st.VersionesAnteriores, &st.Duplicados, &st.Renovaciones, &st.NoConvenios); err != nil {
+		(SELECT count(*) FROM convenios WHERE no_es_convenio = 1 AND archivado_en IS NULL),
+		(SELECT count(*) FROM convenios WHERE archivado_en IS NOT NULL AND reemplazado_por IS NULL)`).Scan(
+		&st.VersionesAnteriores, &st.Duplicados, &st.Renovaciones, &st.NoConvenios, &st.Archivados); err != nil {
 		return st, err
 	}
 	return st, nil

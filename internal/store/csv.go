@@ -38,7 +38,7 @@ func (s *Store) ExportCSV(dst string, ids []int64) (int, error) {
 		"ID", "Tipo de documento", "Dependencia", "Siglas", "Firmante (dependencia)", "Cargo (dependencia)", "Firmante (UAGro)",
 		"Cargo (UAGro)", "Facultad", "Ciudad de la facultad", "Fecha de firma", "Fecha de vigencia",
 		"Situación", "Ámbito", "Estado", "Ciudad", "Etiqueta de facultad", "Temas", "Nombre de archivo",
-		"Archivo original", "Páginas", "Versión", "Notas",
+		"Archivo original", "Páginas", "Versión", "Archivado", "Notas",
 	})
 	n := 0
 	for _, id := range ids {
@@ -59,7 +59,7 @@ func (s *Store) ExportCSV(dst string, ids []int64) (int, error) {
 			c.FirmanteUAGro, c.CargoUAGro, c.Facultad, c.FacultadCiudad, c.FechaFirma, vigencia,
 			estadoLabel[c.Estado], strings.Join(byType["ambito"], ", "), strings.Join(byType["estado"], ", "),
 			strings.Join(byType["ciudad"], ", "), strings.Join(byType["facultad"], ", "),
-			strings.Join(byType["tema"], ", "), c.ArchivoNombre, c.ArchivoNombreOriginal, strconv.Itoa(c.Paginas), versionLabel(c), c.Notas,
+			strings.Join(byType["tema"], ", "), c.ArchivoNombre, c.ArchivoNombreOriginal, strconv.Itoa(c.Paginas), versionLabel(c), archivedLabel(c.ArchivadoEn), c.Notas,
 		}
 		for i := range row {
 			row[i] = csvSafe(row[i])
@@ -108,6 +108,17 @@ func (s *Store) FilterIDs(f ListFilter) ([]int64, error) {
 		}
 		f.Page++
 	}
+}
+
+// archivedLabel muestra la fecha de archivado como «Sí (AAAA-MM-DD)».
+func archivedLabel(fecha string) string {
+	if fecha == "" {
+		return "No"
+	}
+	if len(fecha) >= 10 {
+		fecha = fecha[:10]
+	}
+	return "Sí (" + fecha + ")"
 }
 
 func versionLabel(c ConventionDetail) string {

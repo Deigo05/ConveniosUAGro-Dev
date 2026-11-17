@@ -66,6 +66,9 @@ type ConventionSummary struct {
 	// NoEsConvenio indica que la IA cree que el archivo no es un convenio
 	// (un acta, un oficio, una constancia…) y conviene revisarlo.
 	NoEsConvenio bool `json:"no_es_convenio"`
+	// ArchivadoEn es la fecha en que el usuario lo archivó (vacía si está en
+	// la lista principal).
+	ArchivadoEn string `json:"archivado_en,omitempty"`
 }
 
 // TranscriptionStatus es el avance de una transcripción.
@@ -138,6 +141,9 @@ type ListFilter struct {
 	IncluirAnteriores bool `json:"incluir_anteriores"`
 	// SoloNoConvenios muestra los archivos que la IA marcó como no convenio.
 	SoloNoConvenios bool `json:"solo_no_convenios"`
+	// Archivados muestra la sección de archivados en lugar de la lista
+	// principal: cada convenio aparece en una o en otra, nunca en ambas.
+	Archivados bool `json:"archivados"`
 	// ids limita el listado a esos convenios (uso interno).
 	ids []int64
 }
@@ -168,6 +174,7 @@ type Stats struct {
 	Duplicados          int `json:"duplicados"`
 	Renovaciones        int `json:"renovaciones"`
 	NoConvenios         int `json:"no_convenios"`
+	Archivados          int `json:"archivados"`
 }
 
 // ConventionInput es lo que envía el formulario de edición.

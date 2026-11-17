@@ -18,7 +18,7 @@ import (
 //go:embed schema.sql search.sql
 var schemaFS embed.FS
 
-const schemaVersion = 6
+const schemaVersion = 7
 
 // busquedaExpr calcula la columna busqueda de una fila de convenios. Es la
 // misma expresión que usan los disparadores de search.sql.
@@ -155,8 +155,15 @@ func Open(paths Paths) (*Store, error) {
 			db.Close()
 			return nil, err
 		}
+		version = 6
 	} else if version == 6 {
 		if err := repairV6(db); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
+	if version == 6 {
+		if err := migrateV7(db); err != nil {
 			db.Close()
 			return nil, err
 		}
@@ -433,6 +440,29 @@ func repairV6(db *sql.DB) error {
 		if _, err := tx.Exec(stmt); err != nil {
 			return err
 		}
+	}
+	return tx.Commit()
+}
+
+// migrateV7 agrega la fecha de archivado: los convenios archivados salen de
+// la lista principal y se consultan en su propia sección.
+func migrateV7(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	cols, err := tableColumns(tx, "convenios")
+	if err != nil {
+		return err
+	}
+	if !cols["archivado_en"] {
+		if _, err := tx.Exec("ALTER TABLE convenios ADD COLUMN archivado_en TEXT"); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec("PRAGMA user_version=7"); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

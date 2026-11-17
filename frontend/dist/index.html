@@ -24,6 +24,11 @@
         <span>Convenios</span>
         <span class="nav__badge" id="nav-count">0</span>
       </button>
+      <button class="nav__item" data-view="archivados" id="nav-archivados">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v5H3V4Z"/><path d="M5 9v11h14V9M10 13h4"/></svg>
+        <span>Archivados</span>
+        <span class="nav__badge" id="nav-arch-count" hidden>0</span>
+      </button>
       <button class="nav__item" data-view="duplicados" id="nav-duplicados">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 8V4h12v12h-4"/><path d="M4 8h12v12H4V8Z"/></svg>
         <span>Duplicados</span>
@@ -142,17 +147,35 @@
               <span class="badge badge--violet" id="noconv-count">0</span>
             </button>
             <button class="btn btn--text" id="btn-clear-filters" hidden>Limpiar filtros</button>
-            <div class="toolbar__spacer"></div>
-            <label class="select-wrap select-wrap--small">
-              <span class="sr-only">Ordenar</span>
-              <select id="sort-select">
-                <option value="id">Más recientes</option>
-                <option value="relevancia">Relevancia</option>
-                <option value="dependencia">Dependencia</option>
-                <option value="fecha_firma">Fecha de firma</option>
-                <option value="fecha_vigencia">Fecha de vigencia</option>
-              </select>
-            </label>
+            <div class="toolbar__end">
+              <div class="menu-wrap" id="download-wrap" hidden>
+                <button class="btn btn--outline" id="btn-download-results" aria-haspopup="menu" aria-expanded="false" aria-controls="download-menu">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
+                  <span id="download-results-label">Descargar</span>
+                </button>
+                <div class="menu" id="download-menu" role="menu" hidden>
+                  <p class="menu__head" id="download-menu-head"></p>
+                  <button type="button" class="menu__item" role="menuitem" data-download-results="csv">
+                    <strong>Hoja CSV</strong>
+                    <span>Para Excel: una fila por convenio con sus datos y etiquetas</span>
+                  </button>
+                  <button type="button" class="menu__item" role="menuitem" data-download-results="pdf">
+                    <strong>Archivos PDF</strong>
+                    <span>En una carpeta, cada uno con un nombre útil</span>
+                  </button>
+                </div>
+              </div>
+              <label class="select-wrap select-wrap--small">
+                <span class="sr-only">Ordenar</span>
+                <select id="sort-select">
+                  <option value="id">Más recientes</option>
+                  <option value="relevancia">Relevancia</option>
+                  <option value="dependencia">Dependencia</option>
+                  <option value="fecha_firma">Fecha de firma</option>
+                  <option value="fecha_vigencia">Fecha de vigencia</option>
+                </select>
+              </label>
+            </div>
           </div>
 
           <div class="tag-filter" id="tag-filter-panel" hidden>
@@ -169,9 +192,11 @@
 
           <div class="bulk-bar" id="bulk-bar" hidden>
             <span id="bulk-count">0 seleccionados</span>
+            <button class="btn btn--primary btn--small" id="btn-bulk-ai" title="Transcribe las páginas escaneadas, extrae los datos y revisa las dudas de lectura">Analizar con IA</button>
             <button class="btn btn--outline btn--small" id="btn-bulk-pdf" title="Guardar los PDF en una carpeta, cada uno con un nombre útil">Descargar PDF</button>
             <button class="btn btn--outline btn--small" id="btn-bulk-csv" title="Hoja de cálculo para Excel">Exportar CSV</button>
             <button class="btn btn--outline btn--small" id="btn-bulk-export" title="Paquete con datos y PDF para otra instalación">Exportar paquete</button>
+            <button class="btn btn--outline btn--small" id="btn-bulk-archive" title="Sacarlos de la lista principal sin borrarlos">Archivar</button>
             <button class="btn btn--danger btn--small" id="btn-bulk-delete">Eliminar seleccionados</button>
             <button class="btn btn--text btn--small" id="btn-bulk-clear">Quitar selección</button>
           </div>
@@ -185,10 +210,6 @@
               <label class="check-inline" id="toggle-old-wrap" hidden title="Las versiones reemplazadas por una renovación se ocultan de la lista">
                 <input type="checkbox" id="toggle-old"> Incluir versiones anteriores
               </label>
-              <button class="btn btn--text btn--small" id="btn-export-results" hidden>
-                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
-                Exportar resultados (CSV)
-              </button>
             </div>
             <nav class="pagination" id="pagination" aria-label="Paginación"></nav>
           </div>
@@ -198,7 +219,7 @@
       <section class="view" id="view-detail" hidden>
         <button class="back-link" id="detail-back">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
-          Volver a convenios
+          <span id="detail-back-label">Volver a convenios</span>
         </button>
 
         <div class="detail-heading">
@@ -214,6 +235,10 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
               Descargar PDF
             </button>
+            <button class="btn btn--outline" id="btn-archive" title="Sacarlo de la lista principal sin borrarlo">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h18v5H3V4Z"/><path d="M5 9v11h14V9M10 13h4"/></svg>
+              Archivar
+            </button>
             <button class="btn btn--text" id="btn-mark-noconv" title="Márcalo para revisarlo después; no se borra nada">No es convenio</button>
             <button class="btn btn--danger-text" id="btn-delete">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"/></svg>
@@ -222,6 +247,7 @@
           </div>
         </div>
 
+        <div class="banner banner--archived banner--actions" id="detail-archived-banner" hidden></div>
         <div class="banner banner--violet banner--actions" id="detail-noconv-banner" hidden></div>
         <div class="banner banner--info" id="detail-ai-banner" hidden></div>
         <div class="banner banner--info banner--actions" id="detail-version-banner" hidden></div>
@@ -437,6 +463,48 @@
             </div>
           </section>
         </div>
+      </section>
+
+      <section class="view" id="view-archived" hidden>
+        <div class="section-heading">
+          <p class="muted">Los convenios archivados no aparecen en la lista principal, ni en su buscador ni en sus contadores. Aquí se conservan completos: puedes buscarlos, abrirlos, descargarlos o devolverlos a la lista.</p>
+        </div>
+        <section class="panel panel--list">
+          <div class="toolbar">
+            <label class="search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.2 4.2"/></svg>
+              <input type="search" id="arch-search" placeholder="Buscar en archivados…" title="Usa comillas para buscar una frase exacta" autocomplete="off" maxlength="200">
+              <button type="button" class="search__clear" id="btn-arch-search-clear" aria-label="Limpiar búsqueda" hidden>×</button>
+            </label>
+            <div class="toolbar__spacer"></div>
+            <label class="select-wrap select-wrap--small">
+              <span class="sr-only">Ordenar</span>
+              <select id="arch-sort">
+                <option value="archivado_en">Archivados recientemente</option>
+                <option value="relevancia">Relevancia</option>
+                <option value="dependencia">Dependencia</option>
+                <option value="fecha_vigencia">Fecha de vigencia</option>
+              </select>
+            </label>
+            <button class="btn btn--outline" id="btn-arch-csv" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
+              <span id="arch-csv-label">Descargar CSV</span>
+            </button>
+          </div>
+          <div class="bulk-bar" id="arch-bulk" hidden>
+            <span id="arch-bulk-count">0 seleccionados</span>
+            <button class="btn btn--primary btn--small" id="btn-arch-restore">Devolver a la lista</button>
+            <button class="btn btn--outline btn--small" id="btn-arch-bulk-pdf">Descargar PDF</button>
+            <button class="btn btn--outline btn--small" id="btn-arch-bulk-csv">Exportar CSV</button>
+            <button class="btn btn--text btn--small" id="btn-arch-bulk-clear">Quitar selección</button>
+          </div>
+          <div class="banner banner--warn banner--slim" id="arch-approx" hidden>Ningún archivado contiene todas las palabras; se muestran los que contienen alguna.</div>
+          <div id="arch-area" aria-live="polite"></div>
+          <div class="list-footer">
+            <div class="list-footer__left"><span class="muted" id="arch-summary"></span></div>
+            <nav class="pagination" id="arch-pagination" aria-label="Paginación de archivados"></nav>
+          </div>
+        </section>
       </section>
 
       <section class="view" id="view-dups" hidden>

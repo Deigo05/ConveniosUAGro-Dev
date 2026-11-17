@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.0] - 2026-11-17
+
+### Agregado
+
+- **Sección «Archivados»** en el menú lateral. Desde la lista de convenios (seleccionándolos y pulsando «Archivar») o desde la ficha de cada uno se pueden archivar convenios a mano. Los archivados salen de la lista principal, de su buscador, de sus contadores (vigentes, por vencer, vencidos) y de los reintentos automáticos de IA, pero no se borra nada. La sección tiene su propio buscador, orden (por fecha de archivado, relevancia, dependencia o vigencia), selección múltiple y descarga en CSV o PDF, y cada convenio se puede devolver a la lista con un clic. El archivado se conserva al exportar e importar paquetes y aparece como columna «Archivado» en el CSV.
+- **Descargar los convenios filtrados**: la barra de la lista tiene el botón «Descargar filtrados (N)» (o «Descargar todo» sin filtros), con dos opciones: la hoja CSV o los archivos PDF en una carpeta. Incluye todos los convenios que cumplen el filtro actual, no solo los de la página visible: por ejemplo, con el filtro «Vencidos» se descargan solo los vencidos. Funciona igual con «Vigentes», «Por vencer», «Sin fecha», las etiquetas, la búsqueda y la combinación de varios filtros. Reemplaza al enlace «Exportar resultados (CSV)» del pie de la lista, que solo descargaba el CSV.
+- **Botón «Analizar con IA» en cada convenio de la lista**, y también en la barra de selección para analizar varios a la vez. Hace todo el análisis: transcribe las páginas escaneadas que falten, extrae los datos y revisa con la imagen las lecturas dudosas, con los mismos reintentos automáticos que la importación. Mientras trabaja, la fila muestra «En cola» o «Analizando…». Si el convenio ya tenía un análisis, se pide confirmación porque los datos capturados se reemplazan con lo que lea la IA.
+
+### Cambiado
+
+- Volver a analizar un convenio con IA ya no borra las etiquetas puestas a mano: los temas se suman a los que tenía, y el ámbito, la facultad y la ubicación solo cambian si la IA trae unos nuevos.
+
+### Corregido
+
+- La lista podía quedarse con los resultados de un filtro anterior si el filtro cambiaba mientras se cargaba la página.
+
 ## [1.2.4] - 2026-11-17
 
 Parche de correcciones.
