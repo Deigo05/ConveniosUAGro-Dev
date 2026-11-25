@@ -27,6 +27,17 @@
     return next.transform[4] - (prev.transform[4] + (prev.width || 0)) > 0.15 * h;
   }
 
+  // Separación vertical mayor que 1.8 renglones: cambio de párrafo. Termina la
+  // oración aunque no haya punto (un cierre sin punto antes de las firmas) y
+  // corta el recuadro.
+  const PARAGRAPH_GAP = 1.8;
+
+  function isParagraphBreak(prev, next) {
+    if (!prev.transform || !next.transform) return false;
+    const h = itemHeight(prev) || itemHeight(next);
+    return h > 0 && prev.transform[5] - next.transform[5] > PARAGRAPH_GAP * h;
+  }
+
   // Un punto termina la oración solo si lo que sigue empieza con mayúscula o es
   // el final: así «Chilpancingo, Gro., a los quince días» no se parte en dos.
   function endsSentence(units, u) {
@@ -56,7 +67,9 @@
     const units = [];
     items.forEach((item, i) => {
       const s = String(item.str || '');
-      if (i > 0 && !items[i - 1].hasEOL && needsGap(items[i - 1], item)) {
+      if (i > 0 && isParagraphBreak(items[i - 1], item)) {
+        units.push({ ch: '\n', item: i - 1, offset: String(items[i - 1].str || '').length, paragraph: true });
+      } else if (i > 0 && !items[i - 1].hasEOL && needsGap(items[i - 1], item)) {
         units.push({ ch: ' ', item: i - 1, offset: String(items[i - 1].str || '').length });
       }
       for (let k = 0; k < s.length; k++) units.push({ ch: s[k], item: i, offset: k });
@@ -68,7 +81,10 @@
     const sentenceEnds = [];
     let lastSpace = true;
     for (let u = 0; u < units.length; u++) {
-      const { ch, item, offset } = units[u];
+      const { ch, item, offset, paragraph } = units[u];
+      if (paragraph && text.trimEnd().length && sentenceEnds[sentenceEnds.length - 1] !== text.trimEnd().length) {
+        sentenceEnds.push(text.trimEnd().length);
+      }
       if (ch === '-' || ch === '­') {
         const next = hyphenBreak(units, u);
         if (next >= 0) {
@@ -235,7 +251,10 @@
   // tramo contiguo y legible en la página: texto girado, fragmentos sin
   // posición (transcripción), saltos entre columnas o texto que sube. En esos
   // casos la vista no dibuja recuadro: nunca uno aproximado.
-  function matchRects(index, start, end) {
+  // `measure(item, s)` (opcional) da el ancho de un texto con la letra del
+  // fragmento; sin ella se supone que todas las letras miden lo mismo.
+  function matchRects(index, start, end, measure) {
+    const widthOf = (item, s) => (measure ? measure(item, s) : s.length);
     if (!(end > start)) return null;
     const a = index.pos[start];
     const b = index.pos[end - 1];
@@ -256,8 +275,9 @@
       const w = item.width || 0;
       const from = i === a.item ? a.offset : 0;
       const to = i === b.item ? Math.min(b.offset + 1, s.length) : s.length;
-      const x0 = x + (w * from) / s.length;
-      const x1 = x + (w * to) / s.length;
+      const full = widthOf(item, s) || s.length;
+      const x0 = x + (w * widthOf(item, s.slice(0, from))) / full;
+      const x1 = x + (w * widthOf(item, s.slice(0, to))) / full;
       if (!line) {
         line = { x0, x1, y, h, startX: x };
       } else {
@@ -266,7 +286,7 @@
         if (Math.abs(dy) <= 0.5 * h && gap >= -0.5 * h && gap <= 3 * h) {
           line.x1 = Math.max(line.x1, x1);
           line.h = Math.max(line.h, h);
-        } else if (dy > 0.5 * h && dy <= 2.5 * h && x <= line.startX + 3 * h) {
+        } else if (dy > 0.5 * h && dy <= PARAGRAPH_GAP * h && x <= line.startX + 3 * h) {
           lines.push(line);
           line = { x0, x1, y, h, startX: x };
         } else {

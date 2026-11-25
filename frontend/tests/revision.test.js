@@ -169,3 +169,26 @@ test('ítem sin posición (transcripción): sin recuadro', () => {
   const ix = R.buildPageIndex([{ str: 'lo firman' }]);
   assert.equal(R.matchRects(ix, ...find(ix, 'firman')), null);
 });
+
+/* ---------- Párrafos (encontrado en el entorno de prueba) ---------- */
+
+test('un salto de párrafo termina la oración aunque falte el punto', () => {
+  const ix = R.buildPageIndex([it('lo firman el 15 de marzo de 2024', 72, 300, true), it('Por la UAGro', 72, 270)]);
+  const c = R.findClosings(ix);
+  assert.equal(ix.text.slice(c[0].start, c[0].end), 'lo firman el 15 de marzo de 2024');
+});
+
+test('un renglón separado por un espacio de párrafo no se une al recuadro', () => {
+  const ix = R.buildPageIndex([{ str: 'veinticuatro', transform: [10, 0, 0, 10, 72, 300], width: 60, height: 10 }, { str: 'Por la UAGro', transform: [10, 0, 0, 10, 72, 279], width: 60, height: 10 }]);
+  const a = ix.text.indexOf('veinticuatro');
+  assert.equal(R.matchRects(ix, a, ix.text.indexOf('uagro') + 5), null);
+});
+
+test('con una medida de texto, el recuadro usa el ancho real de las letras', () => {
+  // Mayúsculas miden el doble: «AB cd» = 2+2+1+1+1 = 7 unidades en 70 pt.
+  const ix = R.buildPageIndex([{ str: 'AB cd', transform: [10, 0, 0, 10, 0, 0], width: 70, height: 10 }]);
+  const measure = (item, s) => [...s].reduce((n, ch) => n + (/[A-Z]/.test(ch) ? 2 : 1), 0);
+  const a = ix.text.indexOf('cd');
+  const r = R.matchRects(ix, a, a + 2, measure);
+  assert.deepEqual([r[0].x0, r[0].x1], [50, 70]);
+});
