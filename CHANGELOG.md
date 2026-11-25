@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.0] - 2026-11-25
+
+Revisión puntual de la vigencia: comparar lo que capturó la IA con el documento sin salir de la ficha.
+
+### Agregado
+
+- **«Ver en el documento»**: un ícono junto a Fecha de firma, Fecha de vigencia y Cláusula de vigencia. Al hacer clic, la columna del PDF muestra la página donde está la fuente del dato con un recuadro encima, y los campos siguen a la vista para corregirlos.
+- **Fecha de firma**: se busca el cierre del convenio («…lo firman… a los quince días del mes de…»), empezando por la última página, con la etiqueta «posible cierre». No se busca la fecha capturada: así se ve si la IA tomó otra fecha, como la de un nombramiento. Si hay varios candidatos se recorren con «anterior / siguiente».
+- **Fecha de vigencia y Cláusula de vigencia**: se busca la cláusula tal como está escrita en la ficha. Como la IA guarda la cláusula recortada, lo normal es que se marque una parte («parte de la cláusula»).
+- **Páginas escaneadas**: se indica la página según la transcripción, sin recuadro y con el aviso «compare con la imagen», porque esa transcripción la escribió la propia IA.
+- **Sin recuadro cuando hay duda**: si el texto salta entre columnas (como en los bloques de firmas) o no aparece, la página se muestra sin recuadro y con un aviso. Funciona con todos los convenios ya analizados, sin volver a analizarlos.
+- **Pruebas de la interfaz**: la búsqueda tiene pruebas automáticas que corren antes de cada compilación.
+
 ## [1.3.1] - 2026-11-25
 
 Parche de correcciones encontradas en una revisión completa de la aplicación, con un repaso visual de la lista y la ficha.

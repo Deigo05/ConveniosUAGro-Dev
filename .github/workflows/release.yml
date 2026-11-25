@@ -33,6 +33,9 @@ jobs:
       - name: Pruebas
         run: go test ./...
 
+      - name: Pruebas de la interfaz
+        run: node --test frontend/tests/revision.test.js
+
       - name: Instalar Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.0
 

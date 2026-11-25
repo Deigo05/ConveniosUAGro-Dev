@@ -53,6 +53,8 @@ const state = {
   autoActive: new Set(),
   // De qué sección se abrió la ficha, para que «Volver» regrese ahí.
   detailFrom: 'convenios',
+  // Vista de revisión puntual de la vigencia (ver «Revisión puntual»).
+  review: emptyReview(),
   // Sección de archivados: su propio buscador, orden, página y selección.
   arch: {
     query: '', order: 'archivado_en', dir: 'desc', page: 1,
@@ -111,6 +113,7 @@ async function call(name, ...args) {
 }
 
 function bindEvents() {
+  bindReviewEvents();
   $$('.nav__item').forEach(btn => btn.addEventListener('click', () => navigate(btn.dataset.view)));
   $('#btn-settings-top').addEventListener('click', () => navigate('ajustes'));
   $('#btn-import-top').addEventListener('click', openImport);
@@ -847,6 +850,7 @@ async function openDetail(id, from) {
 function renderDetail() {
   const c = state.current;
   if (!c) return;
+  if (state.review.open && state.review.id !== c.id) closeReview();
   const title = c.dependencia || 'Convenio sin capturar';
   $('#detail-title').textContent = title;
   $('#detail-state-badge').outerHTML = stateBadge(c.estado).replace('<span ', '<span id="detail-state-badge" ');
@@ -1492,7 +1496,7 @@ async function processAutoFileOnce(id) {
   if (!transcrito) {
     setDocActivity(id, 'IA: extrayendo datos…');
     try {
-      await call('ExtractAI', id);
+      await textCall('ExtractAI', id);
       // Un reintento después de transcribir llega por aquí: también revisa
       // las dudas de lectura (si no hay páginas transcritas no hace nada).
       await verifyDoubts(id);
@@ -1545,7 +1549,7 @@ async function verifyDoubts(id, pdf = null) {
     for (const n of pages) {
       if (n >= 1 && n <= doc.numPages) images.push({ pagina: n, imagen: await renderPageJPEG(doc, n, 2400, 2.2, 0.9) });
     }
-    return images.length ? await call('VerifyAI', id, images) : null;
+    return images.length ? await textCall('VerifyAI', id, images) : null;
   } catch (err) {
     console.error(err);
     showToast('No se pudieron revisar las dudas de lectura con la imagen: ' + errorText(err), 'error');
@@ -1576,8 +1580,7 @@ async function transcribeConvention(id, options = {}) {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const chars = content.items.reduce((n, item) => n + String(item.str || '').replace(/\s/g, '').length, 0);
-      if (chars < 30) paginas.push(i);
+      if (Revision.pageChars(content.items) < Revision.MIN_PAGE_CHARS) paginas.push(i);
     }
     if (!paginas.length) {
       if (!auto) showToast('No se encontraron páginas escaneadas para transcribir.', 'info');
@@ -1639,7 +1642,7 @@ async function transcribeConvention(id, options = {}) {
     };
     await Promise.all(pendientes.map(transcribePage));
     if (failed) throw failed;
-    await call('FinishTranscription', id);
+    await textCall('FinishTranscription', id);
     transcribed = true;
     if (state.current?.id === id) {
       state.current = await call('GetConvenio', id);
@@ -1650,7 +1653,7 @@ async function transcribeConvention(id, options = {}) {
     if (state.config.ai_enabled && state.config.has_api_key) {
       setDocActivity(id, 'IA: extrayendo datos…');
       try {
-        await call('ExtractAI', id);
+        await textCall('ExtractAI', id);
         await verifyDoubts(id, pdf);
         if (state.current?.id === id) {
           state.current = await call('GetConvenio', id);
@@ -1697,7 +1700,7 @@ async function extractAI() {
   setButtonBusy($('#btn-ai'), true, 'Analizando…');
   $('#ai-status').textContent = 'Consultando el servicio…';
   try {
-    state.current = await call('ExtractAI', c.id);
+    state.current = await textCall('ExtractAI', c.id);
     renderDetail();
     $('#ai-status').textContent = 'Revisando dudas de lectura…';
     const verified = await verifyDoubts(c.id);
@@ -1846,6 +1849,7 @@ async function confirmImport() {
 
 function showView(view) {
   state.view = view;
+  if (view !== 'detalle' && state.review.open) closeReview();
   $$('.view').forEach(v => v.hidden = true);
   const map = { convenios: 'view-convenios', archivados: 'view-archived', detalle: 'view-detail', duplicados: 'view-dups', etiquetas: 'view-tags', ajustes: 'view-settings' };
   $('#' + (map[view] || 'view-convenios')).hidden = false;
@@ -2686,6 +2690,324 @@ async function handleDroppedFiles(paths) {
   }
   for (const p of packages) await importPackage(p);
   if (pdfs.length) await openImportWith(pdfs);
+}
+
+/* ---------- Revisión puntual ---------- */
+
+// Junto a la fecha de firma, la fecha de vigencia y la cláusula, un ícono abre
+// en la columna del PDF la página donde está la fuente del dato: el cierre del
+// convenio o la cláusula guardada. La búsqueda está en revision.js; aquí solo
+// se lee el PDF con PDF.js y se dibuja. Solo hay recuadro cuando el fragmento
+// es contiguo en una página con texto; en las páginas transcritas solo se
+// indica la página, porque esa transcripción la escribió la propia IA.
+const REVIEW_FIELDS = { firma: 'Fecha de firma', vigencia: 'Fecha de vigencia', clausula: 'Cláusula de vigencia' };
+const REVIEW_ZOOMS = [0.75, 1, 1.25, 1.5, 2];
+
+function emptyReview(token = 0) {
+  return {
+    open: false, id: null, field: null, doc: null, pages: new Map(), transcription: null,
+    candidates: [], pos: 0, page: 1, zoom: 1, token, scanning: false, notice: '',
+    renderTask: null, drawSeq: 0, drawnWidth: 0
+  };
+}
+
+function closeReview() {
+  const rv = state.review;
+  if (rv.renderTask) { try { rv.renderTask.cancel(); } catch (_) {} }
+  if (rv.doc) rv.doc.destroy().catch(() => {});
+  state.review = emptyReview(rv.token + 1);
+  clearReviewCanvas();
+  $('#review').hidden = true;
+  $('.pdf-card').classList.remove('is-reviewing');
+  $$('.field.is-reviewing').forEach(f => f.classList.remove('is-reviewing'));
+  $('#review-boxes').innerHTML = '';
+}
+
+function closeReviewFor(id) {
+  if (state.review.open && state.review.id === id) closeReview();
+}
+
+// Llamadas que pueden cambiar el texto del convenio (análisis, revisión de
+// dudas, fin de transcripción): al terminar cierran la vista de revisión de ese
+// convenio, porque lo que mostraba pudo cambiar.
+async function textCall(method, id, ...args) {
+  const result = await call(method, id, ...args);
+  closeReviewFor(id);
+  return result;
+}
+
+async function reviewPageData(rv, n) {
+  if (rv.pages.has(n)) return rv.pages.get(n);
+  const page = await rv.doc.getPage(n);
+  const content = await page.getTextContent();
+  let data = { index: null, source: null };
+  if (Revision.pageChars(content.items) >= Revision.MIN_PAGE_CHARS) {
+    data = { index: Revision.buildPageIndex(content.items), source: 'pdf', styles: content.styles || {} };
+  } else if (rv.transcription.has(n)) {
+    data = { index: Revision.buildPageIndex([{ str: rv.transcription.get(n) }]), source: 'transcripcion' };
+  }
+  rv.pages.set(n, data);
+  return data;
+}
+
+function reviewCandidate(page, data, match, label) {
+  const pdf = data.source === 'pdf';
+  return {
+    page,
+    label,
+    source: data.source,
+    rects: pdf ? Revision.matchRects(data.index, match.start, match.end, textMeasurer(data.styles)) : null,
+    snippet: pdf ? '' : Revision.snippet(data.index, match.start, match.end)
+  };
+}
+
+// Mide un texto con la familia de letra que PDF.js reporta para el fragmento,
+// para que el recuadro empiece y termine donde empieza y termina el texto.
+function textMeasurer(styles) {
+  const ctx = document.createElement('canvas').getContext('2d');
+  return (item, s) => {
+    const family = (styles[item.fontName] || {}).fontFamily || 'serif';
+    ctx.font = `100px ${family}`;
+    return ctx.measureText(s).width;
+  };
+}
+
+async function openReview(field) {
+  const c = state.current;
+  if (!c || !REVIEW_FIELDS[field] || !window.pdfjsLib) return;
+  if (state.review.open && state.review.id !== c.id) closeReview();
+  const rv = state.review;
+  const token = ++rv.token;
+  const alive = () => state.review === rv && rv.token === token;
+  // Nada de la búsqueda anterior queda en pantalla: se descarta el dibujo en
+  // curso y se limpia la página mientras se busca.
+  rv.drawSeq++;
+  if (rv.renderTask) { try { rv.renderTask.cancel(); } catch (_) {} }
+  clearReviewCanvas();
+  Object.assign(rv, { open: true, id: c.id, field, candidates: [], pos: 0, page: 1, notice: '', scanning: true });
+  $('.pdf-card').classList.add('is-reviewing');
+  $('#review').hidden = false;
+  $$('.field.is-reviewing').forEach(f => f.classList.remove('is-reviewing'));
+  $(`.field[data-field="${field}"]`)?.classList.add('is-reviewing');
+  $('#review-boxes').innerHTML = '';
+  renderReviewHead();
+
+  // La cláusula se toma del campo tal como está escrito, aunque no se haya
+  // guardado todavía.
+  const clause = $('#f-vigencia-texto').value.trim();
+  try {
+    if (!rv.doc) {
+      const doc = await window.pdfjsLib.getDocument({ url: `/pdf/${c.id}` }).promise;
+      if (state.review !== rv) { doc.destroy().catch(() => {}); return; }
+      rv.doc = rv.doc || doc;
+      if (rv.doc !== doc) doc.destroy().catch(() => {});
+    }
+    if (!alive()) return;
+    if (!rv.transcription) {
+      let texto = '';
+      try { texto = (await call('GetTranscription', c.id))?.texto || ''; } catch (_) {}
+      if (!alive()) return;
+      rv.transcription = Revision.splitTranscription(texto);
+    }
+    const total = rv.doc.numPages;
+    if (field === 'firma') {
+      for (let n = total; n >= 1; n--) {
+        const data = await reviewPageData(rv, n);
+        if (!alive()) return;
+        if (!data.index) continue;
+        const found = Revision.findClosings(data.index).reverse();
+        const first = !rv.candidates.length;
+        for (const m of found) rv.candidates.push(reviewCandidate(n, data, m, 'posible cierre'));
+        if (first && found.length) await showReviewCandidate(0);
+        else renderReviewHead();
+      }
+    } else if (!clause) {
+      rv.notice = 'No hay cláusula de vigencia guardada.';
+    } else {
+      const pages = [];
+      for (let n = 1; n <= total; n++) {
+        const data = await reviewPageData(rv, n);
+        if (!alive()) return;
+        if (data.index) pages.push({ page: n, index: data.index });
+      }
+      rv.candidates = Revision.findClause(pages, clause).map(m =>
+        reviewCandidate(m.page, rv.pages.get(m.page), m, m.complete ? 'cláusula completa' : 'parte de la cláusula'));
+    }
+    if (!alive()) return;
+    rv.scanning = false;
+    if (!rv.candidates.length) {
+      if (!rv.notice) {
+        rv.notice = field === 'firma'
+          ? 'No se encontró el cierre en el texto del documento.'
+          : 'No se encontró la cláusula en el texto del documento.';
+        const sinTexto = [...rv.pages.values()].filter(d => !d.source).length;
+        if (sinTexto === 1) rv.notice += ' Hay 1 página escaneada sin transcribir.';
+        else if (sinTexto > 1) rv.notice += ` Hay ${sinTexto} páginas escaneadas sin transcribir.`;
+      }
+      rv.page = 1;
+      renderReviewHead();
+      await drawReviewPage();
+    } else if (field === 'firma') {
+      renderReviewHead();
+    } else {
+      await showReviewCandidate(0);
+    }
+  } catch (err) {
+    if (!alive()) return;
+    console.error(err);
+    rv.scanning = false;
+    rv.candidates = [];
+    rv.notice = 'No se pudo abrir el PDF para revisarlo.';
+    renderReviewHead();
+    clearReviewCanvas();
+  }
+}
+
+async function showReviewCandidate(i) {
+  const rv = state.review;
+  const cand = rv.candidates[i];
+  if (!cand) return;
+  rv.pos = i;
+  rv.page = cand.page;
+  renderReviewHead();
+  await drawReviewPage();
+}
+
+function renderReviewHead() {
+  const rv = state.review;
+  const total = rv.doc ? rv.doc.numPages : 0;
+  const n = rv.candidates.length;
+  const cand = rv.candidates[rv.pos];
+  const onPage = cand && cand.page === rv.page;
+  $('#review-title').textContent = rv.field ? 'Revisando: ' + REVIEW_FIELDS[rv.field] : '';
+  let meta = '';
+  if (rv.scanning && !n) meta = 'Buscando…';
+  else if (total) meta = `Página ${rv.page} de ${total}` + (onPage ? ' · ' + cand.label : '');
+  $('#review-meta').textContent = meta;
+  $('#review-count').textContent = n ? `${rv.pos + 1} de ${n}${rv.scanning ? '…' : ''}` : '';
+  const showNav = n > 1 || (rv.scanning && n > 0);
+  $('#review-prev').hidden = !showNav;
+  $('#review-next').hidden = !showNav;
+  $('#review-prev').disabled = rv.pos <= 0;
+  $('#review-next').disabled = rv.pos >= n - 1;
+  const notice = onPage && cand.source === 'transcripcion'
+    ? 'Según la transcripción de la IA; compare con la imagen.'
+    : rv.notice;
+  $('#review-notice').textContent = notice;
+  $('#review-notice').hidden = !notice;
+  const snippet = onPage ? cand.snippet : '';
+  $('#review-snippet').textContent = snippet;
+  $('#review-snippet').hidden = !snippet;
+  $('#review-page').textContent = total ? `${rv.page} / ${total}` : '';
+  $('#review-page-prev').disabled = !total || rv.page <= 1;
+  $('#review-page-next').disabled = !total || rv.page >= total;
+  const z = REVIEW_ZOOMS.indexOf(rv.zoom);
+  $('#review-zoom-out').disabled = !total || z <= 0;
+  $('#review-zoom-in').disabled = !total || z >= REVIEW_ZOOMS.length - 1;
+}
+
+function clearReviewCanvas() {
+  const canvas = $('#review-canvas');
+  canvas.width = 0;
+  canvas.height = 0;
+  canvas.style.width = '';
+  canvas.style.height = '';
+  $('#review-boxes').innerHTML = '';
+}
+
+async function drawReviewPage() {
+  const rv = state.review;
+  if (!rv.doc) return;
+  const seq = ++rv.drawSeq;
+  const current = () => state.review === rv && rv.drawSeq === seq;
+  const page = await rv.doc.getPage(rv.page);
+  if (!current()) return;
+  const wrap = $('.review-canvas-wrap');
+  const base = page.getViewport({ scale: 1 });
+  const fit = Math.max(0.2, (wrap.clientWidth - 16) / base.width);
+  const viewport = page.getViewport({ scale: fit * rv.zoom });
+  const ratio = window.devicePixelRatio || 1;
+  const canvas = $('#review-canvas');
+  if (rv.renderTask) { try { rv.renderTask.cancel(); } catch (_) {} }
+  canvas.width = Math.floor(viewport.width * ratio);
+  canvas.height = Math.floor(viewport.height * ratio);
+  canvas.style.width = `${Math.floor(viewport.width)}px`;
+  canvas.style.height = `${Math.floor(viewport.height)}px`;
+  const task = page.render({
+    canvasContext: canvas.getContext('2d'),
+    viewport,
+    transform: ratio !== 1 ? [ratio, 0, 0, ratio, 0, 0] : null
+  });
+  rv.renderTask = task;
+  try {
+    await task.promise;
+  } catch (err) {
+    if (err && err.name === 'RenderingCancelledException') return;
+    throw err;
+  }
+  if (!current()) return;
+  const boxes = $('#review-boxes');
+  boxes.innerHTML = '';
+  rv.drawnWidth = wrap.clientWidth;
+  const cand = rv.candidates[rv.pos];
+  if (!cand || cand.page !== rv.page || !cand.rects) return;
+  for (const r of cand.rects) {
+    const [x0, y0, x1, y1] = viewport.convertToViewportRectangle([r.x0, r.y0, r.x1, r.y1]);
+    const box = document.createElement('div');
+    box.style.left = `${Math.min(x0, x1) - 3}px`;
+    box.style.top = `${Math.min(y0, y1) - 3}px`;
+    box.style.width = `${Math.abs(x1 - x0) + 6}px`;
+    box.style.height = `${Math.abs(y1 - y0) + 6}px`;
+    boxes.appendChild(box);
+  }
+  // Se desplaza solo el contenedor de la página, no la ventana.
+  const first = boxes.firstElementChild;
+  const pageEl = canvas.parentElement;
+  wrap.scrollTop = Math.max(0, pageEl.offsetTop + first.offsetTop - wrap.clientHeight / 2);
+  wrap.scrollLeft = Math.max(0, pageEl.offsetLeft + first.offsetLeft - wrap.clientWidth / 4);
+}
+
+function moveReviewPage(delta) {
+  const rv = state.review;
+  if (!rv.doc) return;
+  const page = Math.min(Math.max(rv.page + delta, 1), rv.doc.numPages);
+  if (page === rv.page) return;
+  rv.page = page;
+  renderReviewHead();
+  drawReviewPage().catch(err => console.error(err));
+}
+
+function zoomReview(delta) {
+  const rv = state.review;
+  const i = REVIEW_ZOOMS.indexOf(rv.zoom) + delta;
+  if (!rv.doc || i < 0 || i >= REVIEW_ZOOMS.length) return;
+  rv.zoom = REVIEW_ZOOMS[i];
+  renderReviewHead();
+  drawReviewPage().catch(err => console.error(err));
+}
+
+function bindReviewEvents() {
+  $$('.field-locate').forEach(btn => btn.addEventListener('click', () => {
+    openReview(btn.dataset.review).catch(err => console.error(err));
+  }));
+  $('#review-prev').addEventListener('click', () => showReviewCandidate(state.review.pos - 1).catch(err => console.error(err)));
+  $('#review-next').addEventListener('click', () => showReviewCandidate(state.review.pos + 1).catch(err => console.error(err)));
+  $('#review-page-prev').addEventListener('click', () => moveReviewPage(-1));
+  $('#review-page-next').addEventListener('click', () => moveReviewPage(1));
+  $('#review-zoom-out').addEventListener('click', () => zoomReview(-1));
+  $('#review-zoom-in').addEventListener('click', () => zoomReview(1));
+  $('#review-close').addEventListener('click', closeReview);
+  // Si cambia el ancho de la columna (ventana maximizada, otro tamaño), la
+  // página se vuelve a ajustar al ancho junto con sus recuadros.
+  if (window.ResizeObserver) {
+    let timer = null;
+    new ResizeObserver(() => {
+      const rv = state.review;
+      if (!rv.open || !rv.doc || $('.review-canvas-wrap').clientWidth === rv.drawnWidth) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => drawReviewPage().catch(err => console.error(err)), 150);
+    }).observe($('.review-canvas-wrap'));
+  }
 }
 
 /* ---------- Actualizaciones ---------- */
