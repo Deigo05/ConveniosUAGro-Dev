@@ -1576,8 +1576,7 @@ async function transcribeConvention(id, options = {}) {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      const chars = content.items.reduce((n, item) => n + String(item.str || '').replace(/\s/g, '').length, 0);
-      if (chars < 30) paginas.push(i);
+      if (Revision.pageChars(content.items) < Revision.MIN_PAGE_CHARS) paginas.push(i);
     }
     if (!paginas.length) {
       if (!auto) showToast('No se encontraron páginas escaneadas para transcribir.', 'info');
