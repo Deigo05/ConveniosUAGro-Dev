@@ -196,8 +196,42 @@
     return out;
   }
 
+  /* ---------- Cláusula de vigencia ---------- */
+
+  // Largo mínimo del tramo de la cláusula que se acepta cuando no aparece
+  // completa (la IA la recorta y puede cruzar de página).
+  const MIN_CLAUSE_WORDS = 12;
+
+  // Busca la cláusula guardada en las páginas. Si aparece completa, devuelve
+  // todas sus apariciones. Si no, el tramo más largo de palabras seguidas (12 o
+  // más) que aparezca exactamente una vez en todo el documento.
+  function findClause(pages, clause) {
+    const q = normalizeForSearch(clause);
+    if (!q) return [];
+    const full = [];
+    for (const { page, index } of pages) {
+      for (const start of occurrences(index.text, q)) full.push({ page, start, end: start + q.length, complete: true });
+    }
+    if (full.length) return full;
+    const words = q.split(' ');
+    for (let len = words.length - 1; len >= MIN_CLAUSE_WORDS; len--) {
+      for (let i = 0; i + len <= words.length; i++) {
+        const phrase = words.slice(i, i + len).join(' ');
+        const hits = [];
+        for (const { page, index } of pages) {
+          for (const start of occurrences(index.text, phrase)) hits.push({ page, start, end: start + phrase.length, complete: false });
+          if (hits.length > 1) break;
+        }
+        if (hits.length === 1) return hits;
+      }
+    }
+    return [];
+  }
+
   const Revision = {
     MIN_PAGE_CHARS,
+    MIN_CLAUSE_WORDS,
+    findClause,
     CLOSING_FORMULAS,
     findClosings,
     occurrences,

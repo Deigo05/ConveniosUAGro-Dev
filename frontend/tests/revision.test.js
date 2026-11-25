@@ -94,3 +94,40 @@ test('el candidato no pasa de 80 palabras', () => {
   const c = R.findClosings(ix);
   assert.ok(c.length === 0 || covered(ix, c[0]).split(' ').length <= 80);
 });
+
+/* ---------- Cláusula ---------- */
+
+const CL = 'El presente convenio tendrá una vigencia de tres años contados a partir de la fecha de su firma y podrá renovarse por acuerdo de las partes';
+const pg = (page, s) => ({ page, index: R.buildPageIndex([{ str: s }]) });
+
+test('cláusula completa', () => {
+  const r = R.findClause([pg(1, 'Proemio.'), pg(5, 'DÉCIMA. ' + CL + '. UNDÉCIMA.')], CL);
+  assert.deepEqual(r.map(x => [x.page, x.complete]), [[5, true]]);
+});
+
+test('cláusula recortada por la IA: tramo largo y único', () => {
+  const r = R.findClause([pg(5, 'DÉCIMA. ' + CL.replace('y podrá renovarse', 'pudiendo renovarse'))], CL);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].complete, false);
+  assert.ok(r[0].end - r[0].start >= R.normalizeForSearch('El presente convenio tendrá una vigencia de tres años contados a partir de la fecha de su firma').length);
+});
+
+test('cláusula que cruza de página: el tramo más largo en una página', () => {
+  const words = CL.split(' ');
+  const r = R.findClause([pg(5, words.slice(0, 16).join(' ')), pg(6, words.slice(16).join(' '))], CL);
+  assert.deepEqual(r.map(x => [x.page, x.complete]), [[5, false]]);
+});
+
+test('tramo repetido en el documento no cuenta', () => {
+  const frase = 'contados a partir de la fecha de su firma y podrá renovarse por acuerdo de las partes';
+  const r = R.findClause([pg(2, frase), pg(5, frase)], 'Su vigencia será indefinida, ' + frase + ' x');
+  assert.deepEqual(r, []);
+});
+
+test('menos de 12 palabras: solo coincidencia completa', () => {
+  assert.deepEqual(R.findClause([pg(1, 'vigencia de tres años')], 'una vigencia de tres años y medio'), []);
+});
+
+test('cláusula vacía', () => {
+  assert.deepEqual(R.findClause([pg(1, CL)], '  '), []);
+});
