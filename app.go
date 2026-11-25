@@ -30,7 +30,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.3.0"
+const appVersion = "1.3.1"
 
 // buildCommit y buildDate se fijan al compilar en GitHub Actions con
 // -ldflags "-X main.buildCommit=<sha> -X main.buildDate=<RFC3339>". En una
@@ -55,6 +55,9 @@ type App struct {
 	// tagMu ordena los cambios de etiquetas: con varios documentos
 	// procesándose a la vez, cada uno lee y reescribe sus etiquetas.
 	tagMu sync.Mutex
+	// startupNotice guarda un aviso del arranque hasta que la interfaz lo pide
+	// (protegido por cfgMu).
+	startupNotice string
 
 	// doubts guarda, por convenio, las dudas de lectura de la última
 	// extracción hasta que la interfaz envía las imágenes para revisarlas.
@@ -72,6 +75,9 @@ type Bootstrap struct {
 	Stats  store.Stats   `json:"stats"`
 	App    store.AppInfo `json:"app"`
 	Config config.View   `json:"config"`
+	// Aviso es un mensaje del arranque para el usuario (por ejemplo, que los
+	// ajustes estaban dañados). Se entrega una sola vez.
+	Aviso string `json:"aviso,omitempty"`
 }
 
 // ImportResult informa el resultado de cada archivo importado.
@@ -93,10 +99,8 @@ type ExportResult struct {
 }
 
 func NewApp() (*App, error) {
-	if hasArg(afterUpdateFlag) {
-		// Da tiempo a que la versión anterior termine de cerrar la base.
-		time.Sleep(1500 * time.Millisecond)
-	}
+	// Tras una actualización, main ya esperó a que la versión anterior soltara
+	// el candado de instancia única, así que la base está libre.
 	paths, err := store.DefaultPaths()
 	if err != nil {
 		return nil, err
@@ -105,17 +109,36 @@ func NewApp() (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := config.Load(paths.Config)
-	if err != nil {
-		log.Printf("configuración inválida, se usarán valores iniciales: %v", err)
-		cfg = config.Default()
-		_ = config.Save(paths.Config, cfg)
+	cfg, aviso := loadConfig(paths.Config)
+	return &App{store: st, paths: paths, cfg: cfg, startupNotice: aviso}, nil
+}
+
+// loadConfig lee settings.json. Si está dañado no se sobrescribe: se aparta
+// con otro nombre para no perder la clave y se avisa al usuario.
+func loadConfig(path string) (config.Config, string) {
+	cfg, err := config.Load(path)
+	if err == nil {
+		return cfg, ""
 	}
-	return &App{store: st, paths: paths, cfg: cfg}, nil
+	log.Printf("configuración inválida, se usarán valores iniciales: %v", err)
+	cfg = config.Default()
+	if _, statErr := os.Stat(path); statErr != nil {
+		_ = config.Save(path, cfg)
+		return cfg, ""
+	}
+	damaged := path + ".danado-" + time.Now().Format("20060102-150405")
+	if err := os.Rename(path, damaged); err != nil {
+		log.Printf("no se pudo apartar la configuración dañada: %v", err)
+		return cfg, "No se pudo leer el archivo de ajustes; se usan los valores iniciales sin modificar el archivo. Revise Ajustes antes de usar la IA."
+	}
+	_ = config.Save(path, cfg)
+	return cfg, fmt.Sprintf("El archivo de ajustes estaba dañado y se reemplazó por los valores iniciales. La copia dañada quedó como «%s» en la carpeta de datos. Vuelva a capturar la clave de IA en Ajustes.", filepath.Base(damaged))
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// Las reparaciones cambian etiquetas: se hacen con tagMu, como el resto.
+	a.tagMu.Lock()
 	a.applyPendingSuggestions()
 	if err := a.store.BackfillCityStates(); err != nil {
 		log.Printf("no se pudo asignar el estado de las ciudades: %v", err)
@@ -124,6 +147,7 @@ func (a *App) startup(ctx context.Context) {
 	a.repairFacultyTags()
 	a.repairRequiredTags()
 	a.markOpenAgreements()
+	a.tagMu.Unlock()
 	// La primera vez calcula la huella de todos los textos; luego es inmediato.
 	go func() {
 		a.refreshDuplicates()
@@ -218,7 +242,11 @@ func (a *App) GetBootstrap() (Bootstrap, error) {
 	if err != nil {
 		return Bootstrap{}, err
 	}
-	return Bootstrap{Tags: tags, Stats: stats, App: a.appInfo(), Config: a.configView()}, nil
+	a.cfgMu.Lock()
+	aviso := a.startupNotice
+	a.startupNotice = ""
+	a.cfgMu.Unlock()
+	return Bootstrap{Tags: tags, Stats: stats, App: a.appInfo(), Config: a.configView(), Aviso: aviso}, nil
 }
 
 // ListConvenios devuelve la página filtrada.
@@ -241,14 +269,23 @@ func (a *App) SaveConvenio(in store.ConventionInput) (store.ConventionDetail, er
 		return store.ConventionDetail{}, err
 	}
 	a.tagMu.Lock()
-	if strings.TrimSpace(in.Facultad) == "" && strings.TrimSpace(prev.Facultad) != "" {
-		// Se borró la facultad: su etiqueta ya no corresponde.
-		_ = a.removeFacultyTags(in.ID)
-	}
-	_ = a.applyFacultyTag(in.ID, in.Facultad, in.FacultadCiudad)
+	_ = a.syncFacultyTag(in.ID, prev.Facultad, in.Facultad, in.FacultadCiudad)
 	a.tagMu.Unlock()
 	a.refreshDuplicates()
 	return a.store.Get(in.ID)
+}
+
+// syncFacultyTag aplica la regla de facultad después de que cambió el campo.
+// Si el texto de la facultad es otro, la etiqueta anterior ya no corresponde y
+// se quita antes de aplicar la nueva (o «Convenio Abierto» si el texto nuevo
+// no nombra una facultad). Quien llama debe tener tagMu.
+func (a *App) syncFacultyTag(id int64, prevFacultad, facultad, facultadCiudad string) error {
+	if !strings.EqualFold(strings.TrimSpace(prevFacultad), strings.TrimSpace(facultad)) && strings.TrimSpace(prevFacultad) != "" {
+		if err := a.removeFacultyTags(id); err != nil {
+			return err
+		}
+	}
+	return a.applyFacultyTag(id, facultad, facultadCiudad)
 }
 
 func (a *App) removeFacultyTags(id int64) error {
@@ -306,7 +343,10 @@ func (a *App) ImportPDFs(paths []string) []ImportResult {
 			r.DuplicateID = dup
 			// Mismo archivo ya procesado: se copian sus datos en vez de pagar
 			// otra vez la transcripción y la extracción.
-			if cloned, err := a.store.CloneAnalysis(dup, id); err == nil && cloned {
+			a.tagMu.Lock()
+			cloned, err := a.store.CloneAnalysis(dup, id)
+			a.tagMu.Unlock()
+			if err == nil && cloned {
 				r.Cloned = true
 			}
 		}
@@ -352,7 +392,10 @@ func (a *App) AcceptSuggestions(id int64) (store.ConventionDetail, error) {
 
 // DiscardSuggestions descarta las sugerencias; si remove, deja el convenio sin etiquetas.
 func (a *App) DiscardSuggestions(id int64, remove bool) (store.ConventionDetail, error) {
-	if err := a.store.DiscardSuggestions(id, remove); err != nil {
+	a.tagMu.Lock()
+	err := a.store.DiscardSuggestions(id, remove)
+	a.tagMu.Unlock()
+	if err != nil {
 		return store.ConventionDetail{}, err
 	}
 	return a.store.Get(id)
@@ -491,14 +534,20 @@ func (a *App) GetTags() ([]store.Tag, error) {
 }
 
 func (a *App) CreateTag(in store.TagInput) (store.Tag, error) {
+	a.tagMu.Lock()
+	defer a.tagMu.Unlock()
 	return a.store.CreateTag(in)
 }
 
 func (a *App) UpdateTag(in store.TagInput) error {
+	a.tagMu.Lock()
+	defer a.tagMu.Unlock()
 	return a.store.UpdateTag(in)
 }
 
 func (a *App) DeleteTag(id int64) error {
+	a.tagMu.Lock()
+	defer a.tagMu.Unlock()
 	return a.store.DeleteTag(id)
 }
 
@@ -616,13 +665,17 @@ func (a *App) extract(id int64, nota string, keepDoubts bool) (store.ConventionD
 	for _, s := range res.Sugerencias {
 		sugs = append(sugs, store.Suggestion{Tipo: s.Tipo, Nombre: s.Nombre, Nueva: s.Nueva})
 	}
+	prevFacultad := ""
+	if prev, err := a.store.Get(id); err == nil {
+		prevFacultad = prev.Facultad
+	}
 	if err := a.store.SetAIResult(id, in, res.Estado, sugs, notaCorrecciones); err != nil {
 		return store.ConventionDetail{}, err
 	}
 	if err := a.store.SetAIConvenioFlag(id, res.EsConvenio); err != nil {
 		log.Printf("no se pudo guardar si el convenio %d es un convenio: %v", id, err)
 	}
-	if err := a.applyAITags(id, len(sugs) > 0, res.Facultad, res.FacultadCiudad); err != nil {
+	if err := a.applyAITags(id, len(sugs) > 0, prevFacultad, res.Facultad, res.FacultadCiudad); err != nil {
 		return store.ConventionDetail{}, err
 	}
 	a.refreshDuplicates()
@@ -643,6 +696,12 @@ func (a *App) setDoubts(id int64, dudas []ai.Doubt) {
 		a.doubts = map[int64][]ai.Doubt{}
 	}
 	a.doubts[id] = dudas
+}
+
+func (a *App) hasDoubts(id int64) bool {
+	a.doubtsMu.Lock()
+	defer a.doubtsMu.Unlock()
+	return len(a.doubts[id]) > 0
 }
 
 func (a *App) takeDoubts(id int64) []ai.Doubt {
@@ -688,15 +747,17 @@ type PageImage struct {
 // Si la imagen confirma la lectura correcta, corrige la transcripción y vuelve
 // a extraer los datos con el texto ya corregido.
 func (a *App) VerifyAI(id int64, pages []PageImage) (store.ConventionDetail, error) {
-	dudas := a.takeDoubts(id)
-	if len(dudas) == 0 || len(pages) == 0 {
-		return a.store.Get(id)
-	}
 	a.cfgMu.Lock()
 	cfg := a.cfg
 	a.cfgMu.Unlock()
-	if !cfg.AIEnabled || cfg.APIKey == "" {
+	// La configuración se revisa antes de tomar las dudas: si la IA está
+	// apagada, las dudas se conservan para revisarlas cuando se active.
+	if len(pages) > 0 && a.hasDoubts(id) && (!cfg.AIEnabled || cfg.APIKey == "") {
 		return store.ConventionDetail{}, errors.New("configure y active la IA antes de revisar")
+	}
+	dudas := a.takeDoubts(id)
+	if len(dudas) == 0 || len(pages) == 0 {
+		return a.store.Get(id)
 	}
 	client := ai.New(cfg.APIKey, cfg.BaseURL, cfg.Model, cfg.VisionModel)
 	var (
@@ -756,7 +817,7 @@ func (a *App) VerifyAI(id int64, pages []PageImage) (store.ConventionDetail, err
 // applyAITags aplica las etiquetas sugeridas (no hay paso de aprobación) y
 // completa las obligatorias: la de facultad (o «Convenio Abierto») y el
 // ámbito. Un archivo que no parece convenio solo lleva lo que se sugirió.
-func (a *App) applyAITags(id int64, hasSuggestions bool, facultad, facultadCiudad string) error {
+func (a *App) applyAITags(id int64, hasSuggestions bool, prevFacultad, facultad, facultadCiudad string) error {
 	a.tagMu.Lock()
 	defer a.tagMu.Unlock()
 	if hasSuggestions {
@@ -769,7 +830,7 @@ func (a *App) applyAITags(id int64, hasSuggestions bool, facultad, facultadCiuda
 	if flagged, err := a.store.IsFlaggedNoConvenio(id); err != nil || flagged {
 		return err
 	}
-	_ = a.applyFacultyTag(id, facultad, facultadCiudad)
+	_ = a.syncFacultyTag(id, prevFacultad, facultad, facultadCiudad)
 	return a.store.EnsureAmbito(id)
 }
 
@@ -1068,8 +1129,9 @@ func (a *App) DownloadTranscription(id int64) (string, error) {
 	if err != nil || strings.TrimSpace(dst) == "" {
 		return "", err
 	}
-	if !strings.EqualFold(filepath.Ext(dst), ".txt") {
-		dst += ".txt"
+	dst, err = withExtension(dst, ".txt")
+	if err != nil {
+		return "", err
 	}
 	if err := os.WriteFile(dst, []byte(st.Texto+"\n"), 0o600); err != nil {
 		return "", err
@@ -1093,8 +1155,9 @@ func (a *App) BackupData() (string, error) {
 	if err != nil || strings.TrimSpace(dst) == "" {
 		return "", err
 	}
-	if !strings.EqualFold(filepath.Ext(dst), ".zip") {
-		dst += ".zip"
+	dst, err = withExtension(dst, ".zip")
+	if err != nil {
+		return "", err
 	}
 	if err := a.store.BackupZip(dst); err != nil {
 		return "", err
@@ -1143,8 +1206,9 @@ func (a *App) ExportConvenios(ids []int64) (ExportResult, error) {
 	if err != nil || strings.TrimSpace(dst) == "" {
 		return ExportResult{}, err
 	}
-	if !strings.EqualFold(filepath.Ext(dst), ".zip") {
-		dst += ".zip"
+	dst, err = withExtension(dst, ".zip")
+	if err != nil {
+		return ExportResult{}, err
 	}
 	n, err := a.store.ExportPackage(dst, ids, appVersion)
 	if err != nil {
@@ -1177,8 +1241,9 @@ func (a *App) ExportConveniosCSV(ids []int64, f store.ListFilter) (ExportResult,
 	if err != nil || strings.TrimSpace(dst) == "" {
 		return ExportResult{}, err
 	}
-	if !strings.EqualFold(filepath.Ext(dst), ".csv") {
-		dst += ".csv"
+	dst, err = withExtension(dst, ".csv")
+	if err != nil {
+		return ExportResult{}, err
 	}
 	n, err := a.store.ExportCSV(dst, ids)
 	if err != nil {
@@ -1206,13 +1271,17 @@ func (a *App) ImportConvenios(path string) (store.ImportSummary, error) {
 	if strings.TrimSpace(path) == "" {
 		return store.ImportSummary{}, errors.New("no se eligió ningún archivo")
 	}
+	a.tagMu.Lock()
 	sum, err := a.store.ImportPackage(path)
+	if err == nil {
+		a.unifyCityNames()
+		a.repairFacultyTags()
+		a.markOpenAgreements()
+	}
+	a.tagMu.Unlock()
 	if err != nil {
 		return sum, err
 	}
-	a.unifyCityNames()
-	a.repairFacultyTags()
-	a.markOpenAgreements()
 	a.refreshDuplicates()
 	return sum, nil
 }
@@ -1450,4 +1519,18 @@ func (a *App) LinkVersion(older, newer int64) error {
 // UnlinkVersion saca un convenio del historial y lo vuelve a mostrar como vigente.
 func (a *App) UnlinkVersion(id int64) error {
 	return a.store.UnlinkVersion(id)
+}
+
+// withExtension agrega la extensión cuando el nombre elegido no la trae. El
+// diálogo solo pidió confirmación para el nombre escrito, así que si ya existe
+// un archivo con la extensión agregada no se reemplaza sin preguntar.
+func withExtension(dst, ext string) (string, error) {
+	if strings.EqualFold(filepath.Ext(dst), ext) {
+		return dst, nil
+	}
+	dst += ext
+	if _, err := os.Stat(dst); err == nil {
+		return "", fmt.Errorf("ya existe «%s»; elija otro nombre o escriba el nombre con %s para reemplazarlo", filepath.Base(dst), ext)
+	}
+	return dst, nil
 }

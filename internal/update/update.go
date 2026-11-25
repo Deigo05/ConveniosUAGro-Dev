@@ -90,6 +90,9 @@ type release struct {
 	} `json:"assets"`
 }
 
+// ErrNoRelease indica que GitHub no tiene ningún release publicado.
+var ErrNoRelease = errors.New("GitHub no tiene publicada ninguna versión en este momento (puede estar publicándose una nueva); se volverá a revisar más tarde")
+
 // Check compara el ejecutable actual con el último release publicado.
 func (c *Checker) Check(ctx context.Context, local Build) (Info, error) {
 	info := Info{CurrentVersion: local.Version, CurrentCommit: local.Commit, CheckedAt: time.Now().Format(time.RFC3339)}
@@ -99,7 +102,9 @@ func (c *Checker) Check(ctx context.Context, local Build) (Info, error) {
 		return info, err
 	}
 	if status == http.StatusNotFound {
-		return info, nil // todavía no hay versiones publicadas
+		// Sin release no se puede saber si hay versión nueva: puede estar
+		// publicándose una, o el repositorio cambió. No se informa «al día».
+		return info, ErrNoRelease
 	}
 	info.Version = strings.TrimPrefix(strings.TrimSpace(rel.TagName), "v")
 	info.URL = rel.HTMLURL

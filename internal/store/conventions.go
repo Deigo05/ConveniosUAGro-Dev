@@ -636,7 +636,7 @@ func (s *Store) Stats() (Stats, error) {
 	if err := s.db.QueryRow(`SELECT (SELECT count(*) FROM convenios WHERE reemplazado_por IS NOT NULL),
 		(SELECT count(*) FROM convenio_duplicados WHERE motivo <> 'renovacion'),
 		(SELECT count(*) FROM convenio_duplicados WHERE motivo = 'renovacion'),
-		(SELECT count(*) FROM convenios WHERE no_es_convenio = 1 AND archivado_en IS NULL),
+		(SELECT count(*) FROM convenios WHERE no_es_convenio = 1 AND archivado_en IS NULL AND reemplazado_por IS NULL),
 		(SELECT count(*) FROM convenios WHERE archivado_en IS NOT NULL AND reemplazado_por IS NULL)`).Scan(
 		&st.VersionesAnteriores, &st.Duplicados, &st.Renovaciones, &st.NoConvenios, &st.Archivados); err != nil {
 		return st, err
