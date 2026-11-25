@@ -7,7 +7,8 @@ Esta carpeta es la interfaz de la app de escritorio (Wails v2). **Aunque se llam
 Qué hay en la carpeta:
 
 - `index.html`: el esqueleto con todas las vistas y diálogos.
-- `app.js`: unas 3,200 líneas de JavaScript plano (`'use strict'`, sin módulos ni bundler). Todas sus funciones y constantes son globales de un solo script.
+- `revision.js`: funciones puras de la revisión puntual de la vigencia (índice de texto por página, búsqueda del cierre y de la cláusula, recuadros). Expone el global `Revision` en la WebView y `module.exports` en Node para las pruebas de `frontend/tests/`.
+- `app.js`: unas 3,500 líneas de JavaScript plano (`'use strict'`, sin módulos ni bundler). Todas sus funciones y constantes son globales de un solo script.
 - `styles.css`: los estilos (no se documentan aquí).
 - `vendor/`: PDF.js de terceros (`pdf.min.js`, `pdf.worker.min.js`). No se edita.
 - `assets/`: imágenes (`escudo.png`).
@@ -28,6 +29,12 @@ Qué hay en la carpeta:
   - IA: `GetTranscription`, `BeginTranscription`, `ResumeTranscription`, `TranscribePage`, `FinishTranscription`, `FailTranscription`, `ExtractAI`, `PagesToVerify`, `VerifyAI`, `RetryableError`, `RetryCandidates`
   - Duplicados y versiones: `ListDuplicates`, `DismissDuplicate`, `LinkVersion`, `UnlinkVersion`
   - Ajustes y sistema: `SaveSettings`, `BackupData`, `OpenDataFolder`, `CheckUpdate`, `ApplyUpdate`, `OpenReleasePage`
+
+**Revisión puntual de la vigencia**
+
+- Los íconos `.field-locate` junto a Fecha de firma, Fecha de vigencia y Cláusula de vigencia llaman a `openReview('firma'|'vigencia'|'clausula')`. La vista `#review` reemplaza al `iframe` del PDF (que se oculta, no se recarga) y dibuja la página con PDF.js [app.js:openReview] [app.js:drawReviewPage]
+- Fecha de firma busca el cierre con `Revision.findClosings`, de la última página a la primera, y muestra el primer candidato sin esperar a terminar. Fecha de vigencia y Cláusula buscan el texto de `#f-vigencia-texto` tal como está escrito (aunque no se haya guardado) con `Revision.findClause` [app.js:openReview] [revision.js:findClosings] [revision.js:findClause]
+- Página con 30 caracteres o más en PDF.js: se busca en su texto. Si no, en su transcripción (`GetTranscription`, separada por `[Página N]` con `Revision.splitTranscription`). Sin texto ni transcripción no se busca [app.js:reviewPageData]
 
   [app.js:call] [app.js:setArchived]
 - Eventos de Wails: `runtime.OnFileDrop` va a `handleDroppedFiles`. `EventsOn('update:progress')` va a `onUpdateProgress`. `EventsOn('duplicates:refreshed')` recarga los datos de la vista actual. Go emite esos dos eventos con `EventsEmit` en `app.go` [app.js:setupRuntime]
@@ -167,6 +174,13 @@ Qué hay en la carpeta:
 
 [app.js:openImportWith] [app.js:selectedImportPaths] [app.js:handleDroppedFiles]
 
+**Revisión puntual: reglas**
+
+- Solo hay recuadro si `Revision.matchRects` devuelve rectángulos: fragmentos contiguos de PDF.js, sin texto girado, sin saltos de columna ni de párrafo (más de 1.8 renglones). Si devuelve `null`, la página se muestra sin recuadro; nunca uno aproximado [revision.js:matchRects]
+- Las páginas transcritas nunca llevan recuadro: muestran la frase transcrita y el aviso «Según la transcripción de la IA; compare con la imagen», porque esa transcripción la escribió y corrigió la propia IA [app.js:renderReviewHead]
+- La vista se cierra (y su documento de PDF.js se destruye) con «Volver al PDF completo», al salir de la ficha, al abrir otro convenio y cuando terminan `ExtractAI`, `VerifyAI` o `FinishTranscription` de ese convenio (`textCall`). Redibujar la ficha del mismo convenio no la cierra [app.js:closeReview] [app.js:textCall] [app.js:renderDetail] [app.js:showView]
+- Cada búsqueda lleva un `token`: si se hace clic en otro campo o se cierra la vista, la búsqueda anterior se descarta sin tocar la pantalla [app.js:openReview]
+
 **Otras reglas**
 
 - Solo puede haber una comparación de PDF abierta en duplicados, porque cada visor consume memoria [app.js:toggleDupCompare]
@@ -209,5 +223,6 @@ Qué hay en la carpeta:
 ## Verification
 
 - Run: `go test ./...` (desde la raíz del repositorio). Estas pruebas cubren el backend de Go e incluyen `TestVersionFilesMatch`, que exige que `VERSION`, `appVersion` y `productVersion` de `wails.json` coincidan.
-- No hay pruebas automáticas del frontend. Los cambios en `app.js` o `index.html` se comprueban a mano en la app (por ejemplo con `wails dev`). Revisa la vista afectada, la consola del WebView y que cada `id` que usa `app.js` siga existiendo en `index.html`.
+- Run: `node --test frontend/tests/revision.test.js` (Node 18 o posterior). Cubre las funciones puras de `revision.js` y corre en CI antes de compilar.
+- El resto del frontend no tiene pruebas automáticas. Los cambios en `app.js` o `index.html` se comprueban a mano en la app (por ejemplo con `wails dev`). Revisa la vista afectada, la consola del WebView y que cada `id` que usa `app.js` siga existiendo en `index.html`.
 - Estilo: títulos con serif de Windows (`--titulo`: Cambria o Georgia, sin fuentes incrustadas) y el oro institucional (`--oro`) solo como acento (sección activa y línea bajo la marca). La lista abre la ficha al hacer clic en la fila o en el nombre (un botón, para usarla con teclado); las acciones de la fila son botones de ícono con `title` y `aria-label` [styles.css:root] [app.js:rowHTML]

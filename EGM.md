@@ -175,4 +175,5 @@ Archivos de la raíz:
 ## System Verification
 - Run: `go test ./...`
 - La compilación para Windows se comprueba con `GOOS=windows go vet .`
-- La interfaz no tiene pruebas automatizadas: los cambios en `frontend/dist` se verifican a mano.
+- Run: `node --test frontend/tests/revision.test.js` (funciones puras de la revisión puntual; también corre en CI).
+- El resto de la interfaz no tiene pruebas automatizadas: los cambios en `frontend/dist` se verifican a mano.
