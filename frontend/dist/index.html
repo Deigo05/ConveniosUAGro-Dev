@@ -270,6 +270,36 @@
             <div class="pdf-frame-wrap">
               <iframe id="pdf-frame" title="Vista previa del PDF"></iframe>
             </div>
+            <div class="review" id="review" hidden>
+              <div class="review__head">
+                <div class="review__title">
+                  <strong id="review-title"></strong>
+                  <span class="muted" id="review-meta"></span>
+                </div>
+                <div class="review__nav">
+                  <button type="button" class="btn btn--outline btn--small" id="review-prev" aria-label="Fragmento anterior">‹ anterior</button>
+                  <span class="review__count" id="review-count"></span>
+                  <button type="button" class="btn btn--outline btn--small" id="review-next" aria-label="Fragmento siguiente">siguiente ›</button>
+                </div>
+              </div>
+              <p class="review__notice" id="review-notice" role="status" hidden></p>
+              <p class="review__snippet" id="review-snippet" hidden></p>
+              <div class="review-canvas-wrap">
+                <canvas id="review-canvas"></canvas>
+                <div id="review-boxes"></div>
+              </div>
+              <div class="review__foot">
+                <div class="review__pager">
+                  <button type="button" class="btn btn--ghost btn--small" id="review-page-prev" aria-label="Página anterior">‹</button>
+                  <span id="review-page"></span>
+                  <button type="button" class="btn btn--ghost btn--small" id="review-page-next" aria-label="Página siguiente">›</button>
+                  <span class="review__sep" aria-hidden="true">·</span>
+                  <button type="button" class="btn btn--ghost btn--small" id="review-zoom-out" aria-label="Alejar">−</button>
+                  <button type="button" class="btn btn--ghost btn--small" id="review-zoom-in" aria-label="Acercar">+</button>
+                </div>
+                <button type="button" class="btn btn--outline btn--small" id="review-close">Volver al PDF completo</button>
+              </div>
+            </div>
           </section>
 
           <section class="card form-card">
@@ -344,23 +374,23 @@
               <fieldset class="form-section">
                 <legend>Vigencia</legend>
                 <div class="field-row">
-                  <label class="field">
-                    <span>Fecha de firma</span>
+                  <div class="field" data-field="firma">
+                    <div class="field__head"><label for="f-firma">Fecha de firma</label><button type="button" class="field-locate" data-review="firma" title="Ver en el documento" aria-label="Ver en el documento: Fecha de firma"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h5"/><path d="M13 3l5 5h-5z"/><circle cx="16" cy="15" r="3"/><path d="m18.2 17.2 2.3 2.3"/></svg></button></div>
                     <input type="date" id="f-firma" min="1950-01-01" max="2100-12-31">
-                  </label>
-                  <label class="field">
-                    <span>Fecha de vigencia <span class="badge badge--tiny" id="f-calculada" hidden>calculada</span></span>
+                  </div>
+                  <div class="field" data-field="vigencia">
+                    <div class="field__head"><label for="f-vigencia">Fecha de vigencia <span class="badge badge--tiny" id="f-calculada" hidden>calculada</span></label><button type="button" class="field-locate" data-review="vigencia" title="Ver en el documento" aria-label="Ver en el documento: Fecha de vigencia"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h5"/><path d="M13 3l5 5h-5z"/><circle cx="16" cy="15" r="3"/><path d="m18.2 17.2 2.3 2.3"/></svg></button></div>
                     <input type="date" id="f-vigencia" min="1950-01-01" max="2100-12-31">
-                  </label>
+                  </div>
                 </div>
                 <label class="check">
                   <input type="checkbox" id="f-indefinida">
                   <span>Vigencia indefinida</span>
                 </label>
-                <label class="field">
-                  <span>Cláusula de vigencia <small class="muted">(texto del convenio)</small></span>
+                <div class="field" data-field="clausula">
+                  <div class="field__head"><label for="f-vigencia-texto">Cláusula de vigencia <small class="muted">(texto del convenio)</small></label><button type="button" class="field-locate" data-review="clausula" title="Ver en el documento" aria-label="Ver en el documento: Cláusula de vigencia"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h5"/><path d="M13 3l5 5h-5z"/><circle cx="16" cy="15" r="3"/><path d="m18.2 17.2 2.3 2.3"/></svg></button></div>
                   <textarea id="f-vigencia-texto" rows="3" maxlength="1500"></textarea>
-                </label>
+                </div>
               </fieldset>
               <fieldset class="form-section">
                 <legend>Notas</legend>
