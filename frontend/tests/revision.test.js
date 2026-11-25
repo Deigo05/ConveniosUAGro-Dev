@@ -131,3 +131,41 @@ test('menos de 12 palabras: solo coincidencia completa', () => {
 test('cláusula vacía', () => {
   assert.deepEqual(R.findClause([pg(1, CL)], '  '), []);
 });
+
+/* ---------- Recuadros ---------- */
+
+// Ítem de 10 pt de alto; ancho = 5 pt por carácter.
+const it = (str, x, y, eol = false) => ({ str, transform: [10, 0, 0, 10, x, y], width: str.length * 5, height: 10, hasEOL: eol });
+const find = (ix, s) => { const a = ix.text.indexOf(s); return [a, a + s.length]; };
+
+test('un renglón: un rectángulo que cubre solo lo encontrado', () => {
+  const ix = R.buildPageIndex([it('a los quince dias', 100, 700)]);
+  const r = R.matchRects(ix, ...find(ix, 'quince'));
+  assert.equal(r.length, 1);
+  assert.deepEqual(r[0], { x0: 130, y0: 697.5, x1: 160, y1: 710 });
+});
+
+test('dos renglones seguidos: dos rectángulos', () => {
+  const ix = R.buildPageIndex([it('lo firman en', 100, 700, true), it('Chilpancingo', 72, 686)]);
+  assert.equal(R.matchRects(ix, ...find(ix, 'firman en chilpancingo')).length, 2);
+});
+
+test('dos columnas en la misma altura: sin recuadro', () => {
+  const ix = R.buildPageIndex([it('Por la UAGro', 72, 200), it('Por la Contraparte', 330, 200)]);
+  assert.equal(R.matchRects(ix, ...find(ix, 'uagro por la contraparte')), null);
+});
+
+test('el texto sube en la página: sin recuadro', () => {
+  const ix = R.buildPageIndex([it('final de columna', 72, 100, true), it('inicio de otra', 330, 700)]);
+  assert.equal(R.matchRects(ix, ...find(ix, 'columna inicio')), null);
+});
+
+test('texto rotado: sin recuadro', () => {
+  const ix = R.buildPageIndex([{ str: 'lo firman', transform: [0, 10, -10, 0, 50, 50], width: 45, height: 10 }]);
+  assert.equal(R.matchRects(ix, ...find(ix, 'firman')), null);
+});
+
+test('ítem sin posición (transcripción): sin recuadro', () => {
+  const ix = R.buildPageIndex([{ str: 'lo firman' }]);
+  assert.equal(R.matchRects(ix, ...find(ix, 'firman')), null);
+});

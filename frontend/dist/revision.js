@@ -228,9 +228,62 @@
     return [];
   }
 
+  /* ---------- Recuadros ---------- */
+
+  // Convierte text[start..end) en rectángulos (coordenadas del PDF, un
+  // rectángulo por renglón). Devuelve null cuando la coincidencia no es un
+  // tramo contiguo y legible en la página: texto girado, fragmentos sin
+  // posición (transcripción), saltos entre columnas o texto que sube. En esos
+  // casos la vista no dibuja recuadro: nunca uno aproximado.
+  function matchRects(index, start, end) {
+    if (!(end > start)) return null;
+    const a = index.pos[start];
+    const b = index.pos[end - 1];
+    if (!a || !b) return null;
+    const lines = [];
+    let line = null;
+    let prev = null;
+    for (let i = a.item; i <= b.item; i++) {
+      const item = index.items[i];
+      const s = String(item.str || '');
+      if (!s.trim()) continue;
+      const t = item.transform;
+      if (!t || t[1] !== 0 || t[2] !== 0) return null;
+      const h = itemHeight(item);
+      if (!h) return null;
+      const x = t[4];
+      const y = t[5];
+      const w = item.width || 0;
+      const from = i === a.item ? a.offset : 0;
+      const to = i === b.item ? Math.min(b.offset + 1, s.length) : s.length;
+      const x0 = x + (w * from) / s.length;
+      const x1 = x + (w * to) / s.length;
+      if (!line) {
+        line = { x0, x1, y, h, startX: x };
+      } else {
+        const dy = prev.y - y;
+        const gap = x - prev.end;
+        if (Math.abs(dy) <= 0.5 * h && gap >= -0.5 * h && gap <= 3 * h) {
+          line.x1 = Math.max(line.x1, x1);
+          line.h = Math.max(line.h, h);
+        } else if (dy > 0.5 * h && dy <= 2.5 * h && x <= line.startX + 3 * h) {
+          lines.push(line);
+          line = { x0, x1, y, h, startX: x };
+        } else {
+          return null;
+        }
+      }
+      prev = { y, end: x + w };
+    }
+    if (!line) return null;
+    lines.push(line);
+    return lines.map(l => ({ x0: l.x0, y0: l.y - 0.25 * l.h, x1: l.x1, y1: l.y + l.h }));
+  }
+
   const Revision = {
     MIN_PAGE_CHARS,
     MIN_CLAUSE_WORDS,
+    matchRects,
     findClause,
     CLOSING_FORMULAS,
     findClosings,
