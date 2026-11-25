@@ -1,0 +1,27 @@
+# Etapa 5: revisión de simplificación y de compromisos falsos
+
+Documento: `docs/superpowers/specs/2026-11-25-revision-puntual-fechas-design.md` (líneas 1-141).
+Revisores: `egm-zoom-out` (estándar zoom-out) y `egm-inventive-catalyst` (modo REVIEW). Ambos completos.
+Verificado en el código por el coordinador: `Update` pone `vigencia_calculada=0` (`internal/store/conventions.go:484`); `parseSpanishDate` solo entiende fechas con números (`internal/ai/ai.go:1078`); el prompt pide firmantes sin grados ni tratamientos (`ai.go:292`).
+
+## Simplificación (zoom-out), 1 Blocker, 5 Major, 3 Nit
+
+1. **Blocker. Campos que no son texto del documento van a resaltar lugares equivocados** (líneas 15-24, 29, 92, 98; `ai.go:288`, `:291`, `:293`). Tipo de documento («Acuerdo», «Otro» coinciden con «de común acuerdo», «por otro lado»), ciudad de la facultad (sale del catálogo; «Acapulco» coincide con domicilios), facultad (la IA escribe el nombre del catálogo, no el del documento) y siglas (pueden ser un nombre corto inventado). Recomendación: tratarlos como clasificaciones, igual que las etiquetas. Quitar el botón de tipo de documento y ciudad de la facultad, o dejarlos sin resaltar y con aviso. Facultad pasa a los normalizados. Considerar entregar primero las fechas y la cláusula, y después nombres y cargos.
+2. **Major. La columna `fecha_firma_texto` cuesta mucho para lo que aporta** (líneas 47-48, 78-81, 129). El esquema 8 no tiene vuelta atrás, toca también la importación (`insertRecord`, `importFromDB`) y solo ayuda a los análisis nuevos. Alternativa: buscar la fórmula del cierre («días del mes de», «firmado en») empezando por el final, que sirve para todos los convenios.
+3. **Major. En las páginas escaneadas la coincidencia no prueba nada** (líneas 50, 96, 100; `analysis.go:28-32`, `:122`). `ApplyNameCorrections` y `ApplyPageCorrections` reescriben la transcripción con lo que eligió la IA, y la línea 50 dice lo contrario. Recomendación: corregir la línea 50; en páginas escaneadas indicar solo la página probable, con el aviso «según la transcripción de la IA; compare con la imagen», y nunca «texto exacto».
+4. **Major. Saber si la vigencia se calculó depende de una marca que se pierde** (línea 94; `conventions.go:484`, `app.js:1119`). Cualquier guardado de la ficha pone `vigencia_calculada=0`. Recomendación: si la fecha de vigencia no aparece, buscar siempre la cláusula.
+5. **Major. No se decidió dónde va la lógica que hay que probar** (líneas 135, 141). La interfaz no tiene pruebas de JS, y `parseSpanishDate` no entiende fechas en palabras ni genera variantes. Recomendación: que Go genere los textos a buscar de cada campo, con `go test`, y los entregue con un método; JS solo busca y dibuja. O aceptar por escrito que se verifica a mano.
+6. **Nit. Falta decir cómo obtiene la interfaz el texto por página** (líneas 53, 96). `GetTranscription` ya devuelve el texto con marcas `[Página N]`; basta con partirlo.
+7. **Nit. Quitar títulos a los nombres sobra** (líneas 90, 109). El prompt ya los guarda sin títulos; el dibujo muestra «[Dr. J. Saldaña]», que no corresponde.
+8. **Nit. Ya existe un normalizador** (línea 88). `normalize()` en `app.js:2258`, o `NormalizeKey` en Go.
+9. **Nit. Sobra detalle en algunos puntos y falta en el más riesgoso** (líneas 88-98, 124, 140). Los umbrales y las listas van a «Lo que queda al constructor». Falta nombrar la parte difícil de B: pasar la coincidencia sobre texto normalizado a las cajas de PDF.js, sobre todo en bloques de firmas a dos columnas. Falla segura: sin recuadro, nunca un recuadro aproximado.
+
+## Compromisos falsos (catalizador inventivo), 3 Major, 2 Nit
+
+1. **Major. La transcripción no es evidencia independiente** (líneas 50, 96, 100). Coincide con el punto 3 de simplificación. Propone guardar la lectura original de la visión aparte del texto corregido (columna `texto_original` o tabla de correcciones) y buscar en la original. Contrapartida: otra migración, texto duplicado, y los convenios actuales sin recuperar.
+2. **Major. Que la cita aparezca no prueba que la fecha sea la buena** (líneas 80-82, 93-94, 100, 129). Que `fecha_firma_texto` aparezca solo demuestra que la IA copió algo literal. Si el usuario corrigió la fecha, la vista seguiría resaltando la frase original con máxima confianza. Propone interpretar la cita y compararla con el campo: si difieren, mostrar ambas. Usar «texto exacto» solo cuando coinciden.
+3. **Major. «No aparece así» mezcla «leyó mal» con «reescribió a propósito»** (líneas 29, 70, 90, 98; `ai.go:291-293`). Facultad (catálogo), dependencia (varias contrapartes unidas con «; ») y siglas. Si el aviso se dispara por normalización, el usuario aprende a ignorarlo. Propone una tabla por campo con su origen (literal, catálogo, deducido): partir la dependencia por «; » y buscar los alias de facultad con menos confianza.
+4. **Nit. Ya se pagan punteros a los datos dudosos** (líneas 47-50, 72-74). `dudas` (páginas y lecturas variantes) y `correcciones` se pierden o quedan como texto libre. Propone guardarlas como JSON en la misma migración.
+5. **Nit. Leer todas las páginas al primer clic** (línea 134). `MaxPages` es 2000. Propone una búsqueda incremental: desde el final para la firma y desde el inicio para los demás datos.
+
+Sin compromiso falso, no reabrir: que la vista de PDF.js conviva con el visor de Edge; que no se resalte la zona en páginas escaneadas (sin red ni IA es un límite real); la búsqueda solo al pulsar.
