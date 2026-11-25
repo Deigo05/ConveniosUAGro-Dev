@@ -53,3 +53,44 @@ test('el punto de una abreviatura seguida de minúscula no termina la oración',
   const idx = R.buildPageIndex([{ str: 'en Chilpancingo, Gro., a los quince días.' }]);
   assert.deepEqual(idx.sentenceEnds, [idx.text.trimEnd().length]);
 });
+
+/* ---------- Cierre ---------- */
+
+const idx = s => R.buildPageIndex([{ str: s }]);
+const covered = (ix, c) => ix.text.slice(c.start, c.end);
+
+test('encuentra el cierre con fecha en palabras', () => {
+  const ix = idx('Cláusula final. Leído que fue, lo firman por duplicado en Chilpancingo, Guerrero, a los quince días del mes de marzo de dos mil veinticuatro. Por la UAGro');
+  const c = R.findClosings(ix);
+  assert.equal(c.length, 1);
+  assert.match(covered(ix, c[0]), /^lo firman por duplicado .* dos mil veinticuatro$/);
+});
+
+test('incluye la fecha que va antes de la fórmula en la misma oración', () => {
+  const ix = idx('En Acapulco, el 15 de marzo de 2024, lo firman las partes.');
+  assert.match(covered(ix, R.findClosings(ix)[0]), /^15 de marzo de 2024 lo firman las partes$/);
+});
+
+test('acepta la anotación de firmas y la fecha en números', () => {
+  const ix = idx('Las firmas que anteceden corresponden al convenio de fecha 15/03/2024.');
+  assert.equal(R.findClosings(ix).length, 1);
+});
+
+test('sin fecha no es candidato', () => {
+  assert.deepEqual(R.findClosings(idx('Para constancia de lo anterior, lo firman las partes.')), []);
+});
+
+test('una oración con dos fórmulas da un solo candidato', () => {
+  assert.equal(R.findClosings(idx('Lo firman a los dos días del mes de enero de 2020.')).length, 1);
+});
+
+test('un nombramiento con fecha y fórmula sale como candidato aparte', () => {
+  const ix = idx('Nombrado el día 3 del mes de enero de 2019, firmado en Chilpancingo. Lo firman a los 15 días del mes de marzo de 2024.');
+  assert.equal(R.findClosings(ix).length, 2);
+});
+
+test('el candidato no pasa de 80 palabras', () => {
+  const ix = idx('lo firman ' + 'palabra '.repeat(200) + 'el 1 de enero de 2020.');
+  const c = R.findClosings(ix);
+  assert.ok(c.length === 0 || covered(ix, c[0]).split(' ').length <= 80);
+});

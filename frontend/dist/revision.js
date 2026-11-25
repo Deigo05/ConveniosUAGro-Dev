@@ -130,8 +130,77 @@
     return parts.join(' ').replace(/\s+/g, ' ').trim();
   }
 
+  // Apariciones de una frase normalizada que empiezan y terminan en límite de
+  // palabra («marzo» no coincide dentro de «marzoxx»).
+  function occurrences(text, phrase) {
+    const out = [];
+    if (!phrase) return out;
+    for (let i = text.indexOf(phrase); i >= 0; i = text.indexOf(phrase, i + 1)) {
+      const e = i + phrase.length;
+      if ((i === 0 || text[i - 1] === ' ') && (e === text.length || text[e] === ' ')) out.push(i);
+    }
+    return out;
+  }
+
+  // Oración que contiene la posición `at`, sin espacios en los bordes.
+  function sentenceBounds(index, at) {
+    const text = index.text;
+    let s = 0;
+    let e = text.length;
+    for (const b of index.sentenceEnds) {
+      if (b <= at) s = b;
+      else { e = b; break; }
+    }
+    while (s < e && text[s] === ' ') s++;
+    while (e > s && text[e - 1] === ' ') e--;
+    return [s, e];
+  }
+
+  /* ---------- Cierre ---------- */
+
+  // Fórmulas con que suele empezar o cerrar la oración de firma, ya normalizadas.
+  const CLOSING_FORMULAS = [
+    'dias del mes de', 'dia del mes de', 'lo firman', 'la firman', 'firman por',
+    'firman de conformidad', 'firmado en', 'firmada en', 'se firma', 'suscriben',
+    'para constancia', 'firmas que anteceden'
+  ];
+  const DATE_PATTERNS = [
+    /\b(?:\d{1,2} (?:de )?)?(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b/,
+    /\b\d{1,2} \d{1,2} \d{2,4}\b/
+  ];
+  const MAX_CLOSING_WORDS = 80;
+
+  // Oraciones de una página que tienen una fórmula de cierre y una fecha. Cada
+  // candidato va desde la primera fórmula (o la fecha, si va antes) hasta el
+  // final de la oración, con un máximo de 80 palabras.
+  function findClosings(index) {
+    const text = index.text;
+    const bySentence = new Map();
+    for (const f of CLOSING_FORMULAS) {
+      for (const i of occurrences(text, f)) {
+        const [s, e] = sentenceBounds(index, i);
+        const cur = bySentence.get(s);
+        if (!cur || i < cur.formula) bySentence.set(s, { s, e, formula: i });
+      }
+    }
+    const out = [];
+    for (const { s, e, formula } of [...bySentence.values()].sort((a, b) => a.s - b.s)) {
+      const sentence = text.slice(s, e);
+      const dates = DATE_PATTERNS.map(re => sentence.search(re)).filter(i => i >= 0);
+      if (!dates.length) continue;
+      const start = Math.min(formula, s + Math.min(...dates));
+      const words = text.slice(start, e).split(' ');
+      const end = words.length > MAX_CLOSING_WORDS ? start + words.slice(0, MAX_CLOSING_WORDS).join(' ').length : e;
+      out.push({ start, end });
+    }
+    return out;
+  }
+
   const Revision = {
     MIN_PAGE_CHARS,
+    CLOSING_FORMULAS,
+    findClosings,
+    occurrences,
     buildPageIndex,
     normalizeForSearch,
     pageChars,
