@@ -192,3 +192,45 @@ test('con una medida de texto, el recuadro usa el ancho real de las letras', () 
   const r = R.matchRects(ix, a, a + 2, measure);
   assert.deepEqual([r[0].x0, r[0].x1], [50, 70]);
 });
+
+/* ---------- Correcciones de la revisión final ---------- */
+
+// Renglones de un párrafo a una distancia fija entre sí.
+const lines = (texts, step, y0 = 700) => texts.map((t, i) => it(t, 72, y0 - i * step, true));
+
+test('interlineado de 1.5 (1.83 veces la letra): los renglones no son párrafos', () => {
+  const ix = R.buildPageIndex(lines(['Las partes acuerdan colaborar', 'lo firman en Chilpancingo a los', 'quince días del mes de marzo', 'de dos mil veinticuatro.'], 18.3));
+  const c = R.findClosings(ix);
+  assert.equal(c.length, 1);
+  assert.equal(R.matchRects(ix, c[0].start, c[0].end).length, 3);
+});
+
+test('con renglones normales, un hueco de firmas a 2.5 renglones sigue cortando', () => {
+  const items = lines(['uno dos tres', 'cuatro cinco seis', 'lo firman el 15 de marzo de 2024'], 11.5);
+  items.push(it('Por la UAGro', 72, 700 - 2 * 11.5 - 25));
+  const ix = R.buildPageIndex(items);
+  const c = R.findClosings(ix);
+  assert.equal(ix.text.slice(c[0].start, c[0].end), 'lo firman el 15 de marzo de 2024');
+});
+
+test('una vigencia distinta no cae como «parte de la cláusula» sobre otra cláusula', () => {
+  const term = 'pudiendo darse por terminado anticipadamente por cualquiera de las partes mediante aviso por escrito con treinta días de anticipación';
+  const pages = [pg(4, 'DÉCIMA PRIMERA. TERMINACIÓN. El convenio podrá ' + term + ' sin responsabilidad.')];
+  const vig = 'El presente convenio tendrá vigencia de tres años a partir de su firma, ' + term;
+  assert.deepEqual(R.findClause(pages, vig), []);
+});
+
+test('los tratamientos (Lic., Dr.) no parten el cierre', () => {
+  const ix = idx('Leído que fue el presente convenio, lo firman el Lic. Juan Pérez y el Dr. Javier Saldaña el 15 de marzo de 2024.');
+  assert.equal(R.findClosings(ix).length, 1);
+});
+
+test('una coincidencia de la columna derecha al renglón de abajo en la izquierda no lleva recuadro', () => {
+  const ix = R.buildPageIndex([it('Por la UAGro', 72, 200), it('Por la Contraparte', 330, 200, true), it('Dr. Javier', 72, 186)]);
+  assert.equal(R.matchRects(ix, ...find(ix, 'contraparte dr javier')), null);
+});
+
+test('un párrafo con sangría en el primer renglón sí lleva recuadro', () => {
+  const ix = R.buildPageIndex([it('DÉCIMA. El presente', 108, 300, true), it('convenio tendrá vigencia', 72, 286)]);
+  assert.equal(R.matchRects(ix, ...find(ix, 'presente convenio')).length, 2);
+});

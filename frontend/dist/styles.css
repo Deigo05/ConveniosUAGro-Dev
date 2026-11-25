@@ -309,8 +309,11 @@ textarea { resize: vertical; min-height: 70px; }
 .review__notice { margin: 0; padding: 8px 10px; border-radius: var(--radio-sm); background: var(--ambar-claro); color: var(--ambar); font-size: .78rem; }
 .review__snippet { margin: 0; padding: 8px 10px; border-left: 3px solid var(--oro); background: var(--oro-claro); color: var(--gris-oscuro); font-size: .8rem; }
 .review-canvas-wrap { position: relative; flex: 1 1 auto; min-height: 420px; max-height: 70vh; overflow: auto; border: 1px solid var(--borde); border-radius: 8px; background: #eef1f6; }
-#review-canvas { display: block; margin: 0 auto; background: #fff; }
-#review-boxes { position: absolute; left: 0; top: 0; pointer-events: none; }
+/* Los recuadros se posicionan respecto a la página dibujada, no al contenedor:
+   así siguen sobre el mismo texto aunque cambie el ancho de la ventana. */
+.review-page { position: relative; width: fit-content; margin: 0 auto; }
+#review-canvas { display: block; background: #fff; }
+#review-boxes { position: absolute; inset: 0; pointer-events: none; }
 #review-boxes > div { position: absolute; border: 2px solid var(--oro); background: rgba(196, 154, 44, .15); border-radius: 2px; }
 .review__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .review__pager { display: flex; align-items: center; gap: 2px; font-size: .78rem; color: var(--gris-oscuro); font-variant-numeric: tabular-nums; }

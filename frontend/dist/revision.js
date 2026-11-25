@@ -27,16 +27,45 @@
     return next.transform[4] - (prev.transform[4] + (prev.width || 0)) > 0.15 * h;
   }
 
-  // Separación vertical mayor que 1.8 renglones: cambio de párrafo. Termina la
-  // oración aunque no haya punto (un cierre sin punto antes de las firmas) y
-  // corta el recuadro.
+  // Cambio de párrafo: una separación vertical mayor que 1.5 veces la distancia
+  // típica entre renglones de la página (la mediana), y nunca menor que 1.2
+  // veces la altura de la letra. Si la página tiene muy pocos renglones para
+  // medir, 1.8 veces la altura. Termina la oración aunque no haya punto (un
+  // cierre sin punto antes de las firmas) y corta el recuadro. Medirlo por
+  // página evita partir cada renglón en documentos a 1.5 o a doble espacio.
   const PARAGRAPH_GAP = 1.8;
 
-  function isParagraphBreak(prev, next) {
+  function lineStep(items) {
+    const steps = [];
+    for (let i = 1; i < items.length; i++) {
+      const prev = items[i - 1];
+      const next = items[i];
+      if (!prev.transform || !next.transform) continue;
+      const h = itemHeight(prev) || itemHeight(next);
+      const dy = prev.transform[5] - next.transform[5];
+      if (h > 0 && dy > 0.5 * h && dy < 4 * h) steps.push(dy);
+    }
+    if (steps.length < 3) return 0;
+    steps.sort((a, b) => a - b);
+    return steps[Math.floor(steps.length / 2)];
+  }
+
+  function paragraphLimit(step, h) {
+    return step ? Math.max(1.5 * step, 1.2 * h) : PARAGRAPH_GAP * h;
+  }
+
+  function isParagraphBreak(prev, next, step) {
     if (!prev.transform || !next.transform) return false;
     const h = itemHeight(prev) || itemHeight(next);
-    return h > 0 && prev.transform[5] - next.transform[5] > PARAGRAPH_GAP * h;
+    return h > 0 && prev.transform[5] - next.transform[5] > paragraphLimit(step, h);
   }
+
+  // Tratamientos y abreviaturas cuyo punto no termina la oración aunque los
+  // siga una mayúscula («lo firman el Lic. Juan Pérez»).
+  const ABBREVIATIONS = new Set([
+    'dr', 'dra', 'lic', 'licda', 'licdo', 'mtro', 'mtra', 'ing', 'arq', 'c', 'prof', 'profa',
+    'sr', 'sra', 'srta', 'gro', 'no', 'num', 'cd', 'col', 'av', 'mpio'
+  ]);
 
   // Un punto termina la oración solo si lo que sigue empieza con mayúscula o es
   // el final: así «Chilpancingo, Gro., a los quince días» no se parte en dos.
@@ -65,9 +94,10 @@
   function buildPageIndex(items) {
     items = items || [];
     const units = [];
+    const step = lineStep(items);
     items.forEach((item, i) => {
       const s = String(item.str || '');
-      if (i > 0 && isParagraphBreak(items[i - 1], item)) {
+      if (i > 0 && isParagraphBreak(items[i - 1], item, step)) {
         units.push({ ch: '\n', item: i - 1, offset: String(items[i - 1].str || '').length, paragraph: true });
       } else if (i > 0 && !items[i - 1].hasEOL && needsGap(items[i - 1], item)) {
         units.push({ ch: ' ', item: i - 1, offset: String(items[i - 1].str || '').length });
@@ -92,7 +122,8 @@
           continue;
         }
       }
-      if (ch === '.' && endsSentence(units, u) && sentenceEnds[sentenceEnds.length - 1] !== text.length) {
+      if (ch === '.' && !ABBREVIATIONS.has(text.slice(text.lastIndexOf(' ') + 1)) &&
+          endsSentence(units, u) && sentenceEnds[sentenceEnds.length - 1] !== text.length) {
         sentenceEnds.push(text.length);
       }
       const norm = ch.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
@@ -108,7 +139,7 @@
         }
       }
     }
-    return { text, pos, sentenceEnds, items };
+    return { text, pos, sentenceEnds, items, lineStep: step };
   }
 
   function normalizeForSearch(s) {
@@ -217,10 +248,14 @@
   // Largo mínimo del tramo de la cláusula que se acepta cuando no aparece
   // completa (la IA la recorta y puede cruzar de página).
   const MIN_CLAUSE_WORDS = 12;
+  const MIN_CLAUSE_FRACTION = 0.4;
 
   // Busca la cláusula guardada en las páginas. Si aparece completa, devuelve
-  // todas sus apariciones. Si no, el tramo más largo de palabras seguidas (12 o
-  // más) que aparezca exactamente una vez en todo el documento.
+  // todas sus apariciones. Si no, el inicio más largo de la cláusula (12 o más
+  // palabras y al menos el 40 %) que aparezca exactamente una vez en todo el
+  // documento. Solo el inicio: es la forma de los dos casos reales (la IA
+  // recorta el final; la cláusula sigue en la página siguiente) y evita marcar
+  // un trozo de texto legal que se repite en otra cláusula.
   function findClause(pages, clause) {
     const q = normalizeForSearch(clause);
     if (!q) return [];
@@ -230,16 +265,15 @@
     }
     if (full.length) return full;
     const words = q.split(' ');
-    for (let len = words.length - 1; len >= MIN_CLAUSE_WORDS; len--) {
-      for (let i = 0; i + len <= words.length; i++) {
-        const phrase = words.slice(i, i + len).join(' ');
-        const hits = [];
-        for (const { page, index } of pages) {
-          for (const start of occurrences(index.text, phrase)) hits.push({ page, start, end: start + phrase.length, complete: false });
-          if (hits.length > 1) break;
-        }
-        if (hits.length === 1) return hits;
+    const minLen = Math.max(MIN_CLAUSE_WORDS, Math.ceil(MIN_CLAUSE_FRACTION * words.length));
+    for (let len = words.length - 1; len >= minLen; len--) {
+      const phrase = words.slice(0, len).join(' ');
+      const hits = [];
+      for (const { page, index } of pages) {
+        for (const start of occurrences(index.text, phrase)) hits.push({ page, start, end: start + phrase.length, complete: false });
+        if (hits.length > 1) break;
       }
+      if (hits.length === 1) return hits;
     }
     return [];
   }
@@ -262,6 +296,28 @@
     const lines = [];
     let line = null;
     let prev = null;
+    // Borde izquierdo del primer renglón: se recorren hacia atrás los fragmentos
+    // contiguos del mismo renglón. En una tabla de firmas leída por filas, la
+    // celda de la derecha no tiene fragmentos contiguos a su izquierda, así que
+    // un salto a la celda izquierda del renglón de abajo se rechaza.
+    let firstLeft = null;
+    {
+      const start = index.items[a.item];
+      if (start && start.transform) {
+        let cur = start;
+        firstLeft = start.transform[4];
+        for (let k = a.item - 1; k >= 0; k--) {
+          const p = index.items[k];
+          if (!String(p.str || '').trim()) continue;
+          if (!p.transform) break;
+          const h = itemHeight(cur);
+          if (Math.abs(p.transform[5] - cur.transform[5]) > 0.5 * h) break;
+          if (cur.transform[4] - (p.transform[4] + (p.width || 0)) > 3 * h) break;
+          firstLeft = p.transform[4];
+          cur = p;
+        }
+      }
+    }
     for (let i = a.item; i <= b.item; i++) {
       const item = index.items[i];
       const s = String(item.str || '');
@@ -279,16 +335,17 @@
       const x0 = x + (w * widthOf(item, s.slice(0, from))) / full;
       const x1 = x + (w * widthOf(item, s.slice(0, to))) / full;
       if (!line) {
-        line = { x0, x1, y, h, startX: x };
+        line = { x0, x1, y, h, left: Math.min(firstLeft == null ? x : firstLeft, x) };
       } else {
         const dy = prev.y - y;
         const gap = x - prev.end;
         if (Math.abs(dy) <= 0.5 * h && gap >= -0.5 * h && gap <= 3 * h) {
           line.x1 = Math.max(line.x1, x1);
           line.h = Math.max(line.h, h);
-        } else if (dy > 0.5 * h && dy <= PARAGRAPH_GAP * h && x <= line.startX + 3 * h) {
+        } else if (dy > 0.5 * h && dy <= paragraphLimit(index.lineStep, h) &&
+                   x >= line.left - 5 * h && x <= line.left + 3 * h) {
           lines.push(line);
-          line = { x0, x1, y, h, startX: x };
+          line = { x0, x1, y, h, left: x };
         } else {
           return null;
         }

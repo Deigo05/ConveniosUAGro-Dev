@@ -2707,7 +2707,7 @@ function emptyReview(token = 0) {
   return {
     open: false, id: null, field: null, doc: null, pages: new Map(), transcription: null,
     candidates: [], pos: 0, page: 1, zoom: 1, token, scanning: false, notice: '',
-    renderTask: null, drawSeq: 0
+    renderTask: null, drawSeq: 0, drawnWidth: 0
   };
 }
 
@@ -2716,6 +2716,7 @@ function closeReview() {
   if (rv.renderTask) { try { rv.renderTask.cancel(); } catch (_) {} }
   if (rv.doc) rv.doc.destroy().catch(() => {});
   state.review = emptyReview(rv.token + 1);
+  clearReviewCanvas();
   $('#review').hidden = true;
   $('.pdf-card').classList.remove('is-reviewing');
   $$('.field.is-reviewing').forEach(f => f.classList.remove('is-reviewing'));
@@ -2778,6 +2779,11 @@ async function openReview(field) {
   const rv = state.review;
   const token = ++rv.token;
   const alive = () => state.review === rv && rv.token === token;
+  // Nada de la búsqueda anterior queda en pantalla: se descarta el dibujo en
+  // curso y se limpia la página mientras se busca.
+  rv.drawSeq++;
+  if (rv.renderTask) { try { rv.renderTask.cancel(); } catch (_) {} }
+  clearReviewCanvas();
   Object.assign(rv, { open: true, id: c.id, field, candidates: [], pos: 0, page: 1, notice: '', scanning: true });
   $('.pdf-card').classList.add('is-reviewing');
   $('#review').hidden = false;
@@ -2942,10 +2948,7 @@ async function drawReviewPage() {
   if (!current()) return;
   const boxes = $('#review-boxes');
   boxes.innerHTML = '';
-  boxes.style.left = `${canvas.offsetLeft}px`;
-  boxes.style.top = `${canvas.offsetTop}px`;
-  boxes.style.width = canvas.style.width;
-  boxes.style.height = canvas.style.height;
+  rv.drawnWidth = wrap.clientWidth;
   const cand = rv.candidates[rv.pos];
   if (!cand || cand.page !== rv.page || !cand.rects) return;
   for (const r of cand.rects) {
@@ -2959,8 +2962,9 @@ async function drawReviewPage() {
   }
   // Se desplaza solo el contenedor de la página, no la ventana.
   const first = boxes.firstElementChild;
-  wrap.scrollTop = Math.max(0, canvas.offsetTop + first.offsetTop - wrap.clientHeight / 2);
-  wrap.scrollLeft = Math.max(0, canvas.offsetLeft + first.offsetLeft - wrap.clientWidth / 4);
+  const pageEl = canvas.parentElement;
+  wrap.scrollTop = Math.max(0, pageEl.offsetTop + first.offsetTop - wrap.clientHeight / 2);
+  wrap.scrollLeft = Math.max(0, pageEl.offsetLeft + first.offsetLeft - wrap.clientWidth / 4);
 }
 
 function moveReviewPage(delta) {
@@ -2993,6 +2997,17 @@ function bindReviewEvents() {
   $('#review-zoom-out').addEventListener('click', () => zoomReview(-1));
   $('#review-zoom-in').addEventListener('click', () => zoomReview(1));
   $('#review-close').addEventListener('click', closeReview);
+  // Si cambia el ancho de la columna (ventana maximizada, otro tamaño), la
+  // página se vuelve a ajustar al ancho junto con sus recuadros.
+  if (window.ResizeObserver) {
+    let timer = null;
+    new ResizeObserver(() => {
+      const rv = state.review;
+      if (!rv.open || !rv.doc || $('.review-canvas-wrap').clientWidth === rv.drawnWidth) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => drawReviewPage().catch(err => console.error(err)), 150);
+    }).observe($('.review-canvas-wrap'));
+  }
 }
 
 /* ---------- Actualizaciones ---------- */
