@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -114,7 +115,8 @@ func TestCheckWithoutReleases(t *testing.T) {
 	defer srv.Close()
 	c := &Checker{HTTP: srv.Client(), APIBase: srv.URL, Owner: "o", Repo: "r"}
 	info, err := c.Check(context.Background(), Build{Version: "1.2.0"})
-	if err != nil || info.Available {
+	// Sin release no se puede decir «al día»: debe llegar un error a la interfaz.
+	if !errors.Is(err, ErrNoRelease) || info.Available {
 		t.Fatalf("info=%+v err=%v", info, err)
 	}
 }

@@ -19,8 +19,9 @@ type Faculty struct {
 }
 
 // Faculties es un catálogo de las unidades académicas de nivel superior de la
-// UAGro. Los nombres se normalizan en Resolve: "Unidad Académica de Turismo",
-// "Escuela Superior de Turismo" o "UAGro-FT" llevan a la misma facultad.
+// UAGro. Los nombres se normalizan en Resolve: "Unidad Académica de Turismo"
+// o "Escuela Superior de Turismo" llevan a la misma facultad. Las siglas
+// (por ejemplo, "UAGro-FT") no se reconocen.
 var Faculties = []Faculty{
 	{Name: "Facultad de Turismo", City: "Acapulco", Aliases: []string{"turismo"}, Primary: true},
 	{Name: "Facultad de Turismo", City: "Zihuatanejo", Aliases: []string{"turismo"}},

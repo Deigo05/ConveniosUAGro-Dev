@@ -81,6 +81,7 @@ async function init() {
   try {
     const b = await call('GetBootstrap');
     applyBootstrap(b);
+    if (b.aviso) showToast(b.aviso, 'error');
     await loadList();
     setupRuntime();
     retryFailedOnStart();
@@ -1455,11 +1456,21 @@ async function processAutoFileOnce(id) {
     (c.es_escaneado || Number(c.paginas_por_transcribir || 0) > 0);
   let transcrito = false;
   if (necesitaTranscripcion) {
-    await transcribeConvention(id, { auto: true });
+    const r = await transcribeConvention(id, { auto: true });
+    if (r === 'sin_paginas') {
+      // Al importar se marcaron páginas sin texto, pero PDF.js sí lo encuentra
+      // en todas: no hay nada que transcribir. Se da por completa (para no
+      // repetirlo) y se sigue con la extracción; antes el convenio se quedaba
+      // sin analizar.
+      await call('BeginTranscription', id, 0);
+    } else {
+      transcrito = true;
+    }
     c = await call('GetConvenio', id);
-    transcrito = true;
   }
-  if (!transcrito && c.texto && c.texto.trim()) {
+  // Sin texto también se llama a ExtractAI: marca el error en la ficha («el PDF
+  // no tiene texto seleccionable») en vez de dejar el convenio sin aviso.
+  if (!transcrito) {
     setDocActivity(id, 'IA: extrayendo datos…');
     try {
       await call('ExtractAI', id);
@@ -1551,7 +1562,7 @@ async function transcribeConvention(id, options = {}) {
     }
     if (!paginas.length) {
       if (!auto) showToast('No se encontraron páginas escaneadas para transcribir.', 'info');
-      return;
+      return 'sin_paginas';
     }
     // Una transcripción incompleta se retoma: solo se envían las páginas que
     // faltan. «Volver a transcribir» una completa empieza de cero.
@@ -2692,7 +2703,7 @@ function renderUpdate() {
   if (!badge) return;
   let label = 'Sin revisar';
   let cls = '';
-  if (state.updateError) { label = 'Sin conexión'; cls = 'badge--amber'; }
+  if (state.updateError) { label = 'No se pudo revisar'; cls = 'badge--amber'; }
   else if (available) { label = 'Actualización disponible'; cls = 'badge--blue'; }
   else if (u && u.pending) { label = 'Compilando versión nueva'; cls = 'badge--amber'; }
   else if (u) { label = 'Al día'; cls = 'badge--green'; }

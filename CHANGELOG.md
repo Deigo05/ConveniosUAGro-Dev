@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.1] - 2026-11-25
+
+Parche de correcciones encontradas en una revisión completa de la aplicación.
+
+### Corregido
+
+- **Una sola ventana a la vez**: abrir la aplicación cuando ya estaba abierta creaba una segunda instancia sobre la misma base, y esta marcaba como «Análisis interrumpido» los análisis y transcripciones que la primera tenía en curso. Ahora se trae al frente la ventana que ya estaba abierta. Tras actualizar, la versión nueva espera a que la anterior termine de cerrarse (hasta 30 s) en lugar de una pausa fija de 1.5 s.
+- **Convenios que se quedaban sin analizar**: si al importar un PDF se marcaban páginas como escaneadas, pero el visor sí encontraba texto en todas, la cola automática no transcribía nada y tampoco extraía los datos. Ahora sigue con la extracción. Un PDF sin texto ahora muestra el error en la ficha en lugar de quedarse sin aviso.
+- **Ajustes dañados**: si `settings.json` no se podía leer, se reemplazaba por los valores iniciales y se perdía la clave de IA. Ahora la copia dañada se aparta con otro nombre (`settings.json.danado-…`) y la aplicación avisa al abrir.
+- **La aplicación no abría y no decía por qué** (por ejemplo, con una base de una versión más nueva). Ahora muestra un mensaje con el error, y los errores quedan registrados en `convenios.log` en la carpeta de datos.
+- **Cambiar la facultad** de una facultad reconocida a un texto que no nombra ninguna (por ejemplo, «Rectoría») conservaba la etiqueta anterior. Ahora la quita y marca el convenio como «Convenio Abierto». Lo mismo cuando un nuevo análisis con IA cambia la facultad.
+- **Archivos reemplazados sin preguntar**: si al guardar se escribía un nombre sin extensión (por ejemplo, «respaldo»), se agregaba «.zip» y se sobrescribía «respaldo.zip» aunque ya existiera. Ahora se avisa y no se reemplaza. Aplica al respaldo, a los paquetes, al CSV y a la transcripción.
+- **Dudas de lectura perdidas**: revisar las dudas con la IA apagada daba error y además las descartaba. Ahora se conservan.
+- **Cambios de etiquetas simultáneos**: crear, editar o borrar etiquetas, descartar sugerencias, importar paquetes y las reparaciones del arranque ahora esperan su turno como el resto de cambios de etiquetas, para que ninguno se pierda.
+- El contador «No son convenios» contaba también versiones anteriores y no coincidía con la lista.
+- **Buscar actualizaciones**: si GitHub no tenía ningún release (por ejemplo, mientras se publica uno), la aplicación mostraba «Al día». Ahora indica «No se pudo revisar» y vuelve a intentarlo más tarde. Las publicaciones ya no se cancelan entre sí, así que el release no puede quedar borrado a medias.
+
 ## [1.3.0] - 2026-11-17
 
 ### Agregado

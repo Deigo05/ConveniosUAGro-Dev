@@ -12,9 +12,11 @@ on:
 permissions:
   contents: write
 
+# Las publicaciones van en fila: cancelar una a medias podía dejar el release
+# borrado y sin crear (entre «gh release delete» y «gh release create»).
 concurrency:
   group: release
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
