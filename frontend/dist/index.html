@@ -147,7 +147,36 @@
               <span class="badge badge--violet" id="noconv-count">0</span>
             </button>
             <button class="btn btn--text" id="btn-clear-filters" hidden>Limpiar filtros</button>
-            <div class="toolbar__end">
+          </div>
+
+          <div class="tag-filter" id="tag-filter-panel" hidden>
+            <div class="tag-filter__head">
+              <strong>Filtrar por etiquetas</strong>
+              <span class="muted">Dentro de un grupo se muestra cualquiera; entre grupos se exigen todas.</span>
+              <label class="tag-filter__search">
+                <span class="sr-only">Buscar etiqueta</span>
+                <input type="text" id="tag-filter-search" placeholder="Buscar etiqueta…" autocomplete="off">
+              </label>
+            </div>
+            <div class="tag-filter__groups" id="tag-filter-groups"></div>
+          </div>
+
+          <div class="bulk-bar" id="bulk-bar" hidden>
+            <span id="bulk-count">0 seleccionados</span>
+            <button class="btn btn--primary btn--small" id="btn-bulk-ai" title="Transcribe las páginas escaneadas, extrae los datos y revisa las dudas de lectura">Analizar con IA</button>
+            <button class="btn btn--outline btn--small" id="btn-bulk-pdf" title="Guardar los PDF en una carpeta, cada uno con un nombre útil">Descargar PDF</button>
+            <button class="btn btn--outline btn--small" id="btn-bulk-csv" title="Hoja de cálculo para Excel">Exportar CSV</button>
+            <button class="btn btn--outline btn--small" id="btn-bulk-export" title="Paquete con datos y PDF para otra instalación">Exportar paquete</button>
+            <button class="btn btn--outline btn--small" id="btn-bulk-archive" title="Sacarlos de la lista principal sin borrarlos">Archivar</button>
+            <button class="btn btn--danger btn--small" id="btn-bulk-delete">Eliminar seleccionados</button>
+            <button class="btn btn--text btn--small" id="btn-bulk-clear">Quitar selección</button>
+          </div>
+
+          <div class="banner banner--warn banner--slim" id="approx-banner" hidden>Ningún convenio contiene todas las palabras; se muestran los que contienen alguna. Usa comillas para buscar una frase exacta.</div>
+
+          <div class="list-head" id="list-head">
+            <span class="list-head__count" id="list-head-count"></span>
+            <div class="list-head__actions">
               <div class="menu-wrap" id="download-wrap" hidden>
                 <button class="btn btn--outline" id="btn-download-results" aria-haspopup="menu" aria-expanded="false" aria-controls="download-menu">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>
@@ -177,31 +206,6 @@
               </label>
             </div>
           </div>
-
-          <div class="tag-filter" id="tag-filter-panel" hidden>
-            <div class="tag-filter__head">
-              <strong>Filtrar por etiquetas</strong>
-              <span class="muted">Dentro de un grupo se muestra cualquiera; entre grupos se exigen todas.</span>
-              <label class="tag-filter__search">
-                <span class="sr-only">Buscar etiqueta</span>
-                <input type="text" id="tag-filter-search" placeholder="Buscar etiqueta…" autocomplete="off">
-              </label>
-            </div>
-            <div class="tag-filter__groups" id="tag-filter-groups"></div>
-          </div>
-
-          <div class="bulk-bar" id="bulk-bar" hidden>
-            <span id="bulk-count">0 seleccionados</span>
-            <button class="btn btn--primary btn--small" id="btn-bulk-ai" title="Transcribe las páginas escaneadas, extrae los datos y revisa las dudas de lectura">Analizar con IA</button>
-            <button class="btn btn--outline btn--small" id="btn-bulk-pdf" title="Guardar los PDF en una carpeta, cada uno con un nombre útil">Descargar PDF</button>
-            <button class="btn btn--outline btn--small" id="btn-bulk-csv" title="Hoja de cálculo para Excel">Exportar CSV</button>
-            <button class="btn btn--outline btn--small" id="btn-bulk-export" title="Paquete con datos y PDF para otra instalación">Exportar paquete</button>
-            <button class="btn btn--outline btn--small" id="btn-bulk-archive" title="Sacarlos de la lista principal sin borrarlos">Archivar</button>
-            <button class="btn btn--danger btn--small" id="btn-bulk-delete">Eliminar seleccionados</button>
-            <button class="btn btn--text btn--small" id="btn-bulk-clear">Quitar selección</button>
-          </div>
-
-          <div class="banner banner--warn banner--slim" id="approx-banner" hidden>Ningún convenio contiene todas las palabras; se muestran los que contienen alguna. Usa comillas para buscar una frase exacta.</div>
 
           <div id="list-area" aria-live="polite"></div>
           <div class="list-footer">
@@ -240,6 +244,7 @@
               Archivar
             </button>
             <button class="btn btn--text" id="btn-mark-noconv" title="Márcalo para revisarlo después; no se borra nada">No es convenio</button>
+            <span class="detail-actions__gap" aria-hidden="true"></span>
             <button class="btn btn--danger-text" id="btn-delete">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5"/></svg>
               Eliminar

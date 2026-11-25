@@ -2,7 +2,16 @@
 
 ## [1.3.1] - 2026-11-25
 
-Parche de correcciones encontradas en una revisión completa de la aplicación.
+Parche de correcciones encontradas en una revisión completa de la aplicación, con un repaso visual de la lista y la ficha.
+
+### Cambiado
+
+- **Lista más compacta**: cada convenio ocupa casi la mitad de alto que antes, así que caben más en pantalla. Se ven 3 etiquetas y un «+N» con el resto (al pasar el cursor se ven todas), los avisos van en el mismo renglón que las etiquetas y el nombre del archivo pasó a la ficha.
+- **Etiquetas más legibles**: fondo claro con el texto en el color de la etiqueta, en lugar de colores sólidos que competían entre sí.
+- **Vigencia en una sola columna**: el estado, la fecha y cuánto falta, en vez de dos columnas que repetían lo mismo. Las acciones de cada fila son dos botones: descargar el PDF y analizar con IA. Para abrir la ficha basta con hacer clic en el convenio.
+- **Cabecera de la tabla**: el total de convenios (con el filtro aplicado), «Descargar» y el orden quedan juntos arriba de la tabla, y la barra de búsqueda cabe en un solo renglón.
+- **Ficha**: el nombre de la dependencia ocupa todo el ancho y las acciones van debajo; «Eliminar» queda separado de las demás.
+- **Identidad UAGro**: azul institucional sólido en la barra lateral, oro como acento en la sección activa y títulos con letra serif. Las tarjetas de contadores perdieron los círculos decorativos y muestran el número más grande.
 
 ### Corregido
 

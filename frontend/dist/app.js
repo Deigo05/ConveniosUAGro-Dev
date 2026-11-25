@@ -547,9 +547,7 @@ function renderList() {
       <th data-sort="dependencia">Dependencia <span class="sort-mark">${sortMark('dependencia')}</span></th>
       <th data-sort="fecha_firma">Firma <span class="sort-mark">${sortMark('fecha_firma')}</span></th>
       <th data-sort="fecha_vigencia">Vigencia <span class="sort-mark">${sortMark('fecha_vigencia')}</span></th>
-      <th>Estado</th>
-      <th>Documento</th>
-      <th></th>
+      <th class="th-actions"><span class="sr-only">Acciones</span></th>
     </tr></thead>
     <tbody>${items.map(rowHTML).join('')}</tbody>
   </table></div>`;
@@ -573,8 +571,33 @@ function sortMark(field) {
   return state.filters.dir === 'asc' ? '↑' : '↓';
 }
 
+// MAX_ROW_CHIPS es cuántas etiquetas se ven en cada fila; el resto se resume
+// en «+N» (todas siguen en la ficha y en el título del resumen).
+const MAX_ROW_CHIPS = 3;
+
+function rowChipsHTML(etiquetas) {
+  const list = etiquetas || [];
+  if (!list.length) return '<span class="empty-chips">Sin etiquetas</span>';
+  const shown = list.slice(0, MAX_ROW_CHIPS).map(tag => chipHTML(tag)).join('');
+  const rest = list.slice(MAX_ROW_CHIPS);
+  if (!rest.length) return shown;
+  const names = rest.map(t => t.nombre).join(', ');
+  return shown + `<span class="chip chip--more" title="${esc(names)}">+${rest.length}</span>`;
+}
+
+// vigenciaCellHTML junta en una celda el estado, la fecha y cuánto falta (antes
+// eran dos columnas que repetían lo mismo).
+function vigenciaCellHTML(c, relative = true) {
+  const fecha = c.vigencia_indefinida ? '' : formatDate(c.fecha_vigencia);
+  return `${stateBadge(c.estado)}${fecha ? `<div class="vig-date">${fecha}</div>` : ''}${relative ? relativeVigencia(c) : ''}`;
+}
+
+const ICON_PDF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg>';
+const ICON_AI = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M8 10h8M8 14h5"/></svg>';
+const ICON_RESTORE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10h11a5 5 0 0 1 0 10H9"/><path d="m8 6-4 4 4 4"/></svg>';
+
 function rowHTML(c) {
-  const tags = (c.etiquetas || []).map(tag => chipHTML(tag)).join('');
+  const tags = rowChipsHTML(c.etiquetas);
   const badges = [];
   if (state.config.ai_enabled && c.ia_estado === 'pendiente') {
     badges.push('<span class="badge badge--blue">Analizando…</span>');
@@ -607,18 +630,14 @@ function rowHTML(c) {
   return `<tr data-open="${c.id}" class="${rowClass}">
     <td class="col-check"><input type="checkbox" class="checkbox row-check" data-select="${c.id}" ${selected ? 'checked' : ''} aria-label="Seleccionar ${esc(c.dependencia || c.archivo_nombre_original)}"></td>
     <td class="cell-main">
-      <div class="dep-name">${esc(c.dependencia || 'Sin capturar')}</div>
+      <button type="button" class="dep-name" data-open-btn="${c.id}" title="Abrir la ficha · Archivo: ${esc(c.archivo_nombre || c.archivo_nombre_original)}">${esc(c.dependencia || 'Sin capturar')}</button>
       ${firmantes ? `<div class="dep-meta" title="Firmantes">${firmantes}</div>` : ''}
-      <div class="dep-file" title="Archivo original: ${esc(c.archivo_nombre_original)}">${esc(c.archivo_nombre || c.archivo_nombre_original)}</div>
-      <div class="row-badges">${badges.join('')}</div>
-      <div class="chips chip-list">${tags || '<span class="empty-chips">Sin etiquetas</span>'}</div>
+      <div class="chips chip-list chip-list--row">${badges.join('')}${tags}</div>
       ${snippetHTML(c.fragmento)}
     </td>
     <td class="cell-date">${formatDate(c.fecha_firma) || '—'}</td>
-    <td class="cell-date">${c.vigencia_indefinida ? '<span class="muted">Indefinida</span>' : (formatDate(c.fecha_vigencia) || '—')}${relativeVigencia(c)}</td>
-    <td>${stateBadge(c.estado)}</td>
-    <td><button class="btn btn--text btn--small" data-download="${c.id}" title="Descargar PDF"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0 4-4m-4 4-4-4M5 20h14"/></svg> PDF</button></td>
-    <td class="cell-actions"><div class="cell-actions__stack"><button class="btn btn--outline btn--small" data-open-btn="${c.id}">Abrir</button>${aiButtonHTML(c)}</div></td>
+    <td class="cell-vig">${vigenciaCellHTML(c)}</td>
+    <td class="cell-actions"><div class="icon-actions"><button type="button" class="icon-btn" data-download="${c.id}" title="Descargar PDF" aria-label="Descargar PDF">${ICON_PDF}</button>${aiButtonHTML(c)}</div></td>
   </tr>`;
 }
 
@@ -626,12 +645,12 @@ function rowHTML(c) {
 // convenio está en la cola o en proceso se muestra su estado.
 function aiButtonHTML(c) {
   if (state.autoActive.has(c.id) || isProcessing(c)) {
-    return '<button type="button" class="btn btn--text btn--small btn-ai" disabled><span class="spinner"></span> Analizando…</button>';
+    return '<button type="button" class="icon-btn icon-btn--busy btn-ai" disabled title="Analizando con IA…" aria-label="Analizando con IA"><span class="spinner"></span></button>';
   }
   if (state.autoQueue.includes(c.id)) {
-    return '<button type="button" class="btn btn--text btn--small btn-ai" disabled>En cola</button>';
+    return '<button type="button" class="icon-btn icon-btn--queued btn-ai" disabled title="En cola para analizar con IA">En cola</button>';
   }
-  return `<button type="button" class="btn btn--text btn--small btn-ai" data-ai="${c.id}" title="Todo el análisis con IA: transcribe las páginas escaneadas que falten, extrae los datos y revisa las dudas de lectura">Analizar con IA</button>`;
+  return `<button type="button" class="icon-btn btn-ai" data-ai="${c.id}" title="Analizar con IA: transcribe las páginas escaneadas que falten, extrae los datos y revisa las dudas de lectura" aria-label="Analizar con IA">${ICON_AI}<span>IA</span></button>`;
 }
 
 // snippetHTML muestra el fragmento del texto donde aparece la búsqueda; el
@@ -2143,7 +2162,9 @@ function chipHTML(tag, opts = {}) {
   const fg = contrast(color);
   const isNew = opts.new ? '<span class="chip__new">nueva</span>' : '';
   const attrs = opts.clickable ? `data-tag-id="${tag.id}" role="button" tabindex="0"` : '';
-  return `<span class="chip ${opts.clickable ? 'chip--button' : ''}" ${attrs} style="background:${color};color:${fg};border-color:${shade(color, -.12)}" title="${esc(TYPE_LABEL[tag.tipo] || '')}: ${esc(tag.nombre)}">${esc(tag.nombre)}${isNew}</span>`;
+  // Fondo tenue y texto del mismo tono: con varias etiquetas por fila, los
+  // colores sólidos competían entre sí y con el estado de vigencia.
+  return `<span class="chip ${opts.clickable ? 'chip--button' : ''}" ${attrs} style="background:${tint(color, .88)};color:${readableOn(color)};border-color:${tint(color, .62)}" title="${esc(TYPE_LABEL[tag.tipo] || '')}: ${esc(tag.nombre)}">${esc(tag.nombre)}${isNew}</span>`;
 }
 
 function colorForType(tipo) {
@@ -2163,6 +2184,20 @@ function contrast(hex) {
     + 0.7152 * (g <= .03928 ? g / 12.92 : Math.pow((g + .055) / 1.055, 2.4))
     + 0.0722 * (b <= .03928 ? b / 12.92 : Math.pow((b + .055) / 1.055, 2.4));
   return lum > .45 ? '#1b2430' : '#ffffff';
+}
+
+// tint mezcla el color con blanco (ratio 0 = el color, 1 = blanco).
+function tint(hex, ratio) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  const mix = v => Math.round(v + (255 - v) * ratio);
+  return '#' + [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(mix).map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+// readableOn oscurece el color hasta que se lea sobre su propio tinte claro.
+function readableOn(hex) {
+  let c = hex;
+  for (let i = 0; i < 8 && contrast(c) !== '#ffffff'; i++) c = shade(c, -.08);
+  return shade(c, -.06);
 }
 
 function shade(hex, amount) {
@@ -2286,9 +2321,15 @@ function describeFilters() {
 
 function renderDownloadButton() {
   const total = state.result.total || 0;
+  const plural = total === 1 ? '' : 's';
+  const head = $('#list-head-count');
+  if (head) {
+    head.textContent = isFiltered()
+      ? `${total} convenio${plural} · ${describeFilters()}`
+      : `${total} convenio${plural}`;
+  }
   $('#download-wrap').hidden = total === 0;
   if (!total) { closeDownloadMenu(); return; }
-  const plural = total === 1 ? '' : 's';
   if (isFiltered()) {
     $('#download-results-label').textContent = `Descargar filtrados (${total})`;
     $('#download-menu-head').textContent = `${total} convenio${plural} con el filtro: ${describeFilters()}`;
@@ -2522,9 +2563,8 @@ function renderArchived() {
       <th>Dependencia</th>
       <th>Firma</th>
       <th>Vigencia</th>
-      <th>Estado</th>
       <th>Archivado</th>
-      <th></th>
+      <th class="th-actions"><span class="sr-only">Acciones</span></th>
     </tr></thead>
     <tbody>${items.map(archRowHTML).join('')}</tbody>
   </table></div>`;
@@ -2533,26 +2573,23 @@ function renderArchived() {
 
 function archRowHTML(c) {
   const selected = state.arch.selected.has(c.id);
-  const tags = (c.etiquetas || []).map(tag => chipHTML(tag)).join('');
+  const tags = rowChipsHTML(c.etiquetas);
   const firmantes = [c.firmante_dependencia, c.firmante_uagro].filter(Boolean).map(esc).join(' · ');
   return `<tr data-open="${c.id}" class="${selected ? 'is-selected' : ''}">
     <td class="col-check"><input type="checkbox" class="checkbox row-check" data-select="${c.id}" ${selected ? 'checked' : ''} aria-label="Seleccionar ${esc(c.dependencia || c.archivo_nombre_original)}"></td>
     <td class="cell-main">
-      <div class="dep-name">${esc(c.dependencia || 'Sin capturar')}</div>
+      <button type="button" class="dep-name" data-open-btn="${c.id}" title="Abrir la ficha · Archivo: ${esc(c.archivo_nombre || c.archivo_nombre_original)}">${esc(c.dependencia || 'Sin capturar')}</button>
       ${firmantes ? `<div class="dep-meta" title="Firmantes">${firmantes}</div>` : ''}
-      <div class="dep-file" title="Archivo original: ${esc(c.archivo_nombre_original)}">${esc(c.archivo_nombre || c.archivo_nombre_original)}</div>
-      <div class="chips chip-list">${tags || '<span class="empty-chips">Sin etiquetas</span>'}</div>
+      <div class="chips chip-list chip-list--row">${tags}</div>
       ${snippetHTML(c.fragmento, state.arch.query)}
     </td>
     <td class="cell-date">${formatDate(c.fecha_firma) || '—'}</td>
-    <td class="cell-date">${c.vigencia_indefinida ? '<span class="muted">Indefinida</span>' : (formatDate(c.fecha_vigencia) || '—')}</td>
-    <td>${stateBadge(c.estado)}</td>
-    <td class="cell-archived">${formatDate(c.archivado_en) || '—'}</td>
-    <td class="cell-actions">
-      <button class="btn btn--text btn--small" data-download="${c.id}" title="Descargar PDF">PDF</button>
-      <button class="btn btn--text btn--small" data-restore="${c.id}" title="Regresarlo a la lista principal">Devolver</button>
-      <button class="btn btn--outline btn--small" data-open-btn="${c.id}">Abrir</button>
-    </td>
+    <td class="cell-vig">${vigenciaCellHTML(c, false)}</td>
+    <td class="cell-date cell-archived">${formatDate(c.archivado_en) || '—'}</td>
+    <td class="cell-actions"><div class="icon-actions">
+      <button type="button" class="icon-btn" data-download="${c.id}" title="Descargar PDF" aria-label="Descargar PDF">${ICON_PDF}</button>
+      <button type="button" class="icon-btn" data-restore="${c.id}" title="Devolver a la lista principal" aria-label="Devolver a la lista principal">${ICON_RESTORE}</button>
+    </div></td>
   </tr>`;
 }
 
