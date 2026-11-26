@@ -2750,14 +2750,21 @@ async function reviewPageData(rv, n) {
   return data;
 }
 
-function reviewCandidate(page, data, match, label) {
+// `kind` ('firma' o 'vigencia') decide qué se marca con resaltador dentro del
+// recuadro: solo fechas, o fechas y plazos. Una marca que no se puede ubicar
+// con precisión se omite; el recuadro queda igual.
+function reviewCandidate(page, data, match, label, kind) {
   const pdf = data.source === 'pdf';
+  const spans = Revision.findMarks(data.index, match.start, match.end, kind);
+  const measure = pdf ? textMeasurer(data.styles) : null;
+  const rects = pdf ? Revision.matchRects(data.index, match.start, match.end, measure) : null;
   return {
     page,
     label,
     source: data.source,
-    rects: pdf ? Revision.matchRects(data.index, match.start, match.end, textMeasurer(data.styles)) : null,
-    snippet: pdf ? '' : Revision.snippet(data.index, match.start, match.end)
+    rects,
+    marks: rects ? spans.map(m => Revision.matchRects(data.index, m.start, m.end, measure)).filter(Boolean) : [],
+    snippetParts: pdf ? [] : Revision.snippetParts(data.index, match.start, match.end, spans)
   };
 }
 
@@ -2817,7 +2824,7 @@ async function openReview(field) {
         if (!data.index) continue;
         const found = Revision.findClosings(data.index).reverse();
         const first = !rv.candidates.length;
-        for (const m of found) rv.candidates.push(reviewCandidate(n, data, m, 'posible cierre'));
+        for (const m of found) rv.candidates.push(reviewCandidate(n, data, m, 'posible cierre', 'firma'));
         if (first && found.length) await showReviewCandidate(0);
         else renderReviewHead();
       }
@@ -2831,7 +2838,7 @@ async function openReview(field) {
         if (data.index) pages.push({ page: n, index: data.index });
       }
       rv.candidates = Revision.findClause(pages, clause).map(m =>
-        reviewCandidate(m.page, rv.pages.get(m.page), m, m.complete ? 'cláusula completa' : 'parte de la cláusula'));
+        reviewCandidate(m.page, rv.pages.get(m.page), m, m.complete ? 'cláusula completa' : 'parte de la cláusula', 'vigencia'));
     }
     if (!alive()) return;
     rv.scanning = false;
@@ -2895,9 +2902,17 @@ function renderReviewHead() {
     : rv.notice;
   $('#review-notice').textContent = notice;
   $('#review-notice').hidden = !notice;
-  const snippet = onPage ? cand.snippet : '';
-  $('#review-snippet').textContent = snippet;
-  $('#review-snippet').hidden = !snippet;
+  // Fragmento de la transcripción con las fechas en <mark>. Solo nodos de
+  // texto: el contenido viene del documento.
+  const parts = onPage ? cand.snippetParts : [];
+  const snippetEl = $('#review-snippet');
+  snippetEl.replaceChildren(...parts.map(p => {
+    if (!p.mark) return document.createTextNode(p.text);
+    const m = document.createElement('mark');
+    m.textContent = p.text;
+    return m;
+  }));
+  snippetEl.hidden = !parts.length;
   $('#review-page').textContent = total ? `${rv.page} / ${total}` : '';
   $('#review-page-prev').disabled = !total || rv.page <= 1;
   $('#review-page-next').disabled = !total || rv.page >= total;
@@ -2951,17 +2966,31 @@ async function drawReviewPage() {
   rv.drawnWidth = wrap.clientWidth;
   const cand = rv.candidates[rv.pos];
   if (!cand || cand.page !== rv.page || !cand.rects) return;
-  for (const r of cand.rects) {
+  const place = (r, cls, pad) => {
     const [x0, y0, x1, y1] = viewport.convertToViewportRectangle([r.x0, r.y0, r.x1, r.y1]);
-    const box = document.createElement('div');
-    box.style.left = `${Math.min(x0, x1) - 3}px`;
-    box.style.top = `${Math.min(y0, y1) - 3}px`;
-    box.style.width = `${Math.abs(x1 - x0) + 6}px`;
-    box.style.height = `${Math.abs(y1 - y0) + 6}px`;
-    boxes.appendChild(box);
+    const el = document.createElement('div');
+    el.className = cls;
+    el.style.left = `${Math.min(x0, x1) - pad}px`;
+    el.style.top = `${Math.min(y0, y1) - pad}px`;
+    el.style.width = `${Math.abs(x1 - x0) + 2 * pad}px`;
+    el.style.height = `${Math.abs(y1 - y0) + 2 * pad}px`;
+    boxes.appendChild(el);
+    return el;
+  };
+  // El recuadro da el contexto; el resaltador marca la fecha o el plazo.
+  const marks = cand.marks || [];
+  boxes.classList.toggle('has-marks', marks.length > 0);
+  for (const r of cand.rects) place(r, 'review-region', 3);
+  let firstMark = null;
+  for (const rects of marks) {
+    for (const r of rects) {
+      const el = place(r, 'review-mark', 1);
+      firstMark = firstMark || el;
+    }
   }
-  // Se desplaza solo el contenedor de la página, no la ventana.
-  const first = boxes.firstElementChild;
+  // Se desplaza solo el contenedor de la página, no la ventana, y se centra en
+  // la primera marca si la hay.
+  const first = firstMark || boxes.firstElementChild;
   const pageEl = canvas.parentElement;
   wrap.scrollTop = Math.max(0, pageEl.offsetTop + first.offsetTop - wrap.clientHeight / 2);
   wrap.scrollLeft = Math.max(0, pageEl.offsetLeft + first.offsetLeft - wrap.clientWidth / 4);

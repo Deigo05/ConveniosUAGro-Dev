@@ -239,7 +239,7 @@ test('un párrafo con sangría en el primer renglón sí lleva recuadro', () => 
 
 const marks = (s, kind, from, to) => {
   const ix = idx(s);
-  return R.findMarks(ix, from ?? 0, to ?? ix.text.length, kind).map(m => ix.text.slice(m.start, m.end));
+  return R.findMarks(ix, from ?? 0, to ?? ix.text.length, kind).map(m => ix.text.slice(m.start, m.end).trim());
 };
 
 test('firma: fecha en letra con números entre paréntesis y año en letra', () => {
@@ -290,4 +290,29 @@ test('las marcas no salen del tramo pedido', () => {
   assert.deepEqual(marks(s, 'firma', from), ['25 dias del mes de noviembre de 2025']);
   const cut = ix.text.indexOf(' de 2025');
   assert.deepEqual(marks(s, 'firma', from, cut), ['25 dias del mes de noviembre']);
+});
+
+test('snippetParts separa el texto original en tramos normales y marcados', () => {
+  const ix = idx('Firmado a los 25 días del mes de noviembre de 2025, en Chilpancingo.');
+  const end = ix.text.trimEnd().length;
+  const parts = R.snippetParts(ix, 0, end, R.findMarks(ix, 0, end, 'firma'));
+  assert.deepEqual(parts, [
+    { text: 'Firmado a los ', mark: false },
+    { text: '25 días del mes de noviembre de 2025', mark: true },
+    { text: ', en Chilpancingo', mark: false }
+  ]);
+});
+
+test('snippetParts sin marcas da el mismo texto que snippet', () => {
+  const ix = idx('a los Quince días.');
+  const s = ix.text.indexOf('quince');
+  assert.deepEqual(R.snippetParts(ix, s, s + 'quince dias'.length, []), [{ text: 'Quince días', mark: false }]);
+});
+
+test('la marca incluye el paréntesis que cierra el número', () => {
+  const ix = idx('a los quince (15) días del mes de agosto del año dos mil veinticinco (2025).');
+  const end = ix.text.trimEnd().length;
+  const parts = R.snippetParts(ix, 0, end, R.findMarks(ix, 0, end, 'firma'));
+  assert.deepEqual(parts.filter(p => p.mark).map(p => p.text),
+    ['quince (15) días del mes de agosto del año dos mil veinticinco (2025)']);
 });

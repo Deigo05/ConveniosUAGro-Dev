@@ -320,7 +320,46 @@
     const overlaps = c => chosen.some(o => c.start < o.end && o.start < c.end);
     for (const c of collect(MARK_DATES)) if (!overlaps(c)) chosen.push(c);
     if (kind === 'vigencia') for (const c of collect(MARK_TERMS)) if (!overlaps(c)) chosen.push(c);
+    // «(2025)»: el texto normalizado termina en «2025»; se incluye el
+    // paréntesis que cierra para que la marca no quede cortada.
+    for (const c of chosen) {
+      const p = index.pos[c.end];
+      if (index.text[c.end] === ' ' && p && String(index.items[p.item].str || '')[p.offset] === ')') c.end++;
+    }
     return chosen.sort((a, b) => a.start - b.start);
+  }
+
+  // Texto original entre dos posiciones {item, offset}; la segunda no se incluye.
+  function originalSlice(index, a, b) {
+    const parts = [];
+    for (let i = a.item; i <= b.item; i++) {
+      const s = String(index.items[i].str || '');
+      parts.push(s.slice(i === a.item ? a.offset : 0, i === b.item ? b.offset : s.length));
+    }
+    return parts.join(' ');
+  }
+
+  // El fragmento de text[start..end) en texto original, partido en tramos
+  // normales y marcados según `marks` (de findMarks). Para mostrar la
+  // transcripción con la fecha resaltada.
+  function snippetParts(index, start, end, marks) {
+    if (!(end > start) || !index.pos[start] || !index.pos[end - 1]) return [];
+    const after = i => ({ item: index.pos[i].item, offset: index.pos[i].offset + 1 });
+    const out = [];
+    let cur = index.pos[start];
+    for (const m of marks || []) {
+      if (m.start < start || m.end > end + 1 || !(m.end > m.start)) continue;
+      out.push({ text: originalSlice(index, cur, index.pos[m.start]), mark: false });
+      out.push({ text: originalSlice(index, index.pos[m.start], after(m.end - 1)), mark: true });
+      cur = after(m.end - 1);
+    }
+    out.push({ text: originalSlice(index, cur, after(end - 1)), mark: false });
+    out.forEach(p => { p.text = p.text.replace(/\s+/g, ' '); });
+    if (out.length) {
+      out[0].text = out[0].text.trimStart();
+      out[out.length - 1].text = out[out.length - 1].text.trimEnd();
+    }
+    return out.filter(p => p.text);
   }
 
   /* ---------- Recuadros ---------- */
@@ -410,6 +449,7 @@
     CLOSING_FORMULAS,
     findClosings,
     findMarks,
+    snippetParts,
     occurrences,
     buildPageIndex,
     normalizeForSearch,
