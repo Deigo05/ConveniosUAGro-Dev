@@ -278,6 +278,51 @@
     return [];
   }
 
+  /* ---------- Marcas de fecha y plazo ---------- */
+
+  // Expresiones sobre el texto normalizado (sin acentos ni signos: «(25)» queda
+  // «25», «25/11/2025» queda «25 11 2025», «año» queda «ano»).
+  const NUM_WORDS = 'un|uno|una|primero|primer|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez|' +
+    'once|doce|trece|catorce|quince|dieciseis|diecisiete|dieciocho|diecinueve|veinte|veintiun|' +
+    'veintiuno|veintiuna|veintidos|veintitres|veinticuatro|veinticinco|veintiseis|veintisiete|' +
+    'veintiocho|veintinueve|treinta|cuarenta|cincuenta|sesenta|setenta|ochenta|noventa';
+  const MONTHS = 'enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre';
+  const WORD_NUM = `(?:${NUM_WORDS})(?: y (?:${NUM_WORDS}))?`;
+  // Un número en cifras o en letra, con su número entre paréntesis si lo trae.
+  const NUM = `(?:\\d{1,3}o?|${WORD_NUM})(?: \\d{1,3})?`;
+  const YEAR = `(?:\\d{4}|dos mil(?: ${WORD_NUM})?)(?: \\d{4})?`;
+  const B0 = '(?<=^| )';
+  const B1 = '(?= |$)';
+  const MARK_DATES = [
+    new RegExp(`${B0}(?:${NUM}(?: dias?)?(?: del mes)? de )?(?:${MONTHS})(?: del?(?: ano)? ${YEAR})?${B1}`, 'g'),
+    new RegExp(`${B0}\\d{1,2} \\d{1,2} \\d{2,4}${B1}`, 'g')
+  ];
+  // Plazos de vigencia: años, meses o indefinidos. Los días casi siempre son
+  // avisos de terminación, y un plazo «de anticipación» o «antes» también.
+  const MARK_TERMS = [
+    new RegExp(`${B0}${NUM} (?:anos?|mes|meses)${B1}(?! de anticipacion| antes)`, 'g'),
+    new RegExp(`${B0}(?:tiempo )?(?:indefinid|indeterminad)[ao]${B1}`, 'g')
+  ];
+
+  // Tramos de text[start..end) que se marcan con resaltador dentro del
+  // recuadro: las fechas para la firma; fechas y plazos para la vigencia. En
+  // orden, sin traslapes; una fecha gana sobre un plazo que la toca.
+  function findMarks(index, start, end, kind) {
+    const slice = index.text.slice(start, end);
+    const collect = res => {
+      const out = [];
+      for (const re of res) {
+        for (const m of slice.matchAll(re)) out.push({ start: start + m.index, end: start + m.index + m[0].length });
+      }
+      return out.sort((a, b) => a.start - b.start || b.end - a.end);
+    };
+    const chosen = [];
+    const overlaps = c => chosen.some(o => c.start < o.end && o.start < c.end);
+    for (const c of collect(MARK_DATES)) if (!overlaps(c)) chosen.push(c);
+    if (kind === 'vigencia') for (const c of collect(MARK_TERMS)) if (!overlaps(c)) chosen.push(c);
+    return chosen.sort((a, b) => a.start - b.start);
+  }
+
   /* ---------- Recuadros ---------- */
 
   // Convierte text[start..end) en rectángulos (coordenadas del PDF, un
@@ -364,6 +409,7 @@
     findClause,
     CLOSING_FORMULAS,
     findClosings,
+    findMarks,
     occurrences,
     buildPageIndex,
     normalizeForSearch,
