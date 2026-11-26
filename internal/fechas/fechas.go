@@ -143,6 +143,9 @@ var (
 	reNumeric = regexp.MustCompile(`\b(\d{1,2}) (\d{1,2}) (\d{4})\b`)
 	// Marcas de la transcripción: palabra dudosa o ilegible.
 	reDoubt = regexp.MustCompile(`(?i)\[\?\]|\[ilegible\]`)
+	reDoubtOrStamp = regexp.MustCompile(`(?i)\[\?\]|\[ilegible\]|\[sello`)
+	// Rastro de una fecha en un cierre: un mes o «días del mes».
+	reDateTrace = regexp.MustCompile(`\b(dias? del mes|enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b`)
 	// Palabras que anuncian la fecha de término en la cláusula de vigencia.
 	reEndWord = regexp.MustCompile(`\b(hasta|al|concluira|concluye|terminara|termina|vencera|vence|finalizara|fenecera|fenece)\b`)
 )
@@ -351,7 +354,14 @@ func checkFirma(in Input) (Result, bool) {
 		if in.FechaFirma == "" || p < len(n.s)*2/5 {
 			return Result{}, false
 		}
+		// Debe haber rastro de una fecha que no se pudo leer completa: un mes,
+		// «días del mes» o una marca de la transcripción. Una simple mención
+		// («el firmado en 2021») no es un cierre ilegible.
 		s, _ := n.original(p, min(len(n.s), p+1))
+		window := n.s[p:min(len(n.s), p+300)]
+		if !reDateTrace.MatchString(window) && !reDoubtOrStamp.MatchString(in.Texto[s:min(len(in.Texto), s+300)]) {
+			return Result{}, false
+		}
 		r.Cita = quote(in.Texto[s:min(len(in.Texto), s+220)])
 		r.Motivo = "No se encontró una fecha legible en el cierre del documento; compare la fecha con el PDF."
 		return r, true

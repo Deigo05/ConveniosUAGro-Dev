@@ -1,6 +1,10 @@
 package store
 
-import "time"
+import (
+	"time"
+
+	"convenios-uagro-desktop/internal/fechas"
+)
 
 // Tag es una etiqueta del catálogo. Las de ámbito y estado son protegidas.
 type Tag struct {
@@ -69,6 +73,9 @@ type ConventionSummary struct {
 	// ArchivadoEn es la fecha en que el usuario lo archivó (vacía si está en
 	// la lista principal).
 	ArchivadoEn string `json:"archivado_en,omitempty"`
+	// FechasPorConfirmar lista los campos ("firma", "vigencia") cuya fecha no
+	// coincide con el texto del convenio (ver RefreshDateChecks).
+	FechasPorConfirmar []string `json:"fechas_por_confirmar,omitempty"`
 }
 
 // TranscriptionStatus es el avance de una transcripción.
@@ -98,6 +105,9 @@ type ConventionDetail struct {
 	// VersionActual es el convenio vigente del historial cuando este es una
 	// versión anterior.
 	VersionActual int64 `json:"version_actual,omitempty"`
+	// RevisionFechas explica qué fechas conviene confirmar con el documento y
+	// qué dice el texto (ver RefreshDateChecks).
+	RevisionFechas []fechas.Result `json:"revision_fechas"`
 }
 
 // RelatedRef es otro convenio que parece duplicado o renovación de este.
@@ -144,6 +154,8 @@ type ListFilter struct {
 	// Archivados muestra la sección de archivados en lugar de la lista
 	// principal: cada convenio aparece en una o en otra, nunca en ambas.
 	Archivados bool `json:"archivados"`
+	// SoloFechasPorConfirmar muestra los convenios con alguna fecha por confirmar.
+	SoloFechasPorConfirmar bool `json:"solo_fechas_por_confirmar"`
 	// ids limita el listado a esos convenios (uso interno).
 	ids []int64
 }
@@ -175,6 +187,7 @@ type Stats struct {
 	Renovaciones        int `json:"renovaciones"`
 	NoConvenios         int `json:"no_convenios"`
 	Archivados          int `json:"archivados"`
+	FechasPorConfirmar  int `json:"fechas_por_confirmar"`
 }
 
 // ConventionInput es lo que envía el formulario de edición.

@@ -109,6 +109,13 @@ func TestCheckFirmaCierreIlegible(t *testing.T) {
 	_ = r
 }
 
+func TestCheckMencionDeFirmaSinRastroDeFechaNoMarca(t *testing.T) {
+	rs := Check(Input{Texto: "Convenio que renueva el firmado en 2021", FechaFirma: "2024-02-01"})
+	if len(rs) != 0 {
+		t.Fatalf("una mención sin rastro de fecha no es un cierre ilegible: %+v", rs)
+	}
+}
+
 func TestCheckSinCierreNoMarca(t *testing.T) {
 	rs := Check(Input{Texto: "Un texto sin fórmula de firma. El 3 de marzo de 2024 se dio de alta.", FechaFirma: "2024-01-01"})
 	if len(rs) != 0 {
