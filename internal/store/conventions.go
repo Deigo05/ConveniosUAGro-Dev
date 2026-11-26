@@ -236,6 +236,9 @@ func (s *Store) list(f ListFilter, fts string) (ListResult, error) {
 	if f.SoloNoConvenios {
 		conds = append(conds, "c.no_es_convenio=1")
 	}
+	if f.SoloFechasPorConfirmar {
+		conds = append(conds, pendingDateFilter)
+	}
 	limit := pageSize
 	archivo := "c.archivado_en IS NULL"
 	if f.Archivados {
@@ -346,6 +349,9 @@ func (s *Store) list(f ListFilter, fts string) (ListResult, error) {
 		items[i].ArchivoNombre = FileName(items[i])
 	}
 	if err := s.attachMarks(items); err != nil {
+		return ListResult{}, err
+	}
+	if err := s.attachDateReviews(items); err != nil {
 		return ListResult{}, err
 	}
 	return ListResult{Items: items, Total: total, TotalRegistrados: totalRegistrados, Page: f.Page, Pages: pages}, nil
@@ -464,6 +470,12 @@ func (s *Store) Get(id int64) (ConventionDetail, error) {
 	}
 	if len(c.Historial) > 0 && head == id {
 		c.Versiones = len(c.Historial) - 1
+	}
+	if c.RevisionFechas, err = s.DateReviews(id); err != nil {
+		return c, err
+	}
+	for _, r := range c.RevisionFechas {
+		c.FechasPorConfirmar = append(c.FechasPorConfirmar, r.Campo)
 	}
 	return c, nil
 }
@@ -637,8 +649,9 @@ func (s *Store) Stats() (Stats, error) {
 		(SELECT count(*) FROM convenio_duplicados WHERE motivo <> 'renovacion'),
 		(SELECT count(*) FROM convenio_duplicados WHERE motivo = 'renovacion'),
 		(SELECT count(*) FROM convenios WHERE no_es_convenio = 1 AND archivado_en IS NULL AND reemplazado_por IS NULL),
-		(SELECT count(*) FROM convenios WHERE archivado_en IS NOT NULL AND reemplazado_por IS NULL)`).Scan(
-		&st.VersionesAnteriores, &st.Duplicados, &st.Renovaciones, &st.NoConvenios, &st.Archivados); err != nil {
+		(SELECT count(*) FROM convenios WHERE archivado_en IS NOT NULL AND reemplazado_por IS NULL),
+		(SELECT count(*) FROM convenios c WHERE c.archivado_en IS NULL AND c.reemplazado_por IS NULL AND `+pendingDateFilter+`)`).Scan(
+		&st.VersionesAnteriores, &st.Duplicados, &st.Renovaciones, &st.NoConvenios, &st.Archivados, &st.FechasPorConfirmar); err != nil {
 		return st, err
 	}
 	return st, nil

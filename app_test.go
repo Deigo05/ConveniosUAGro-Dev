@@ -522,3 +522,49 @@ func TestVerifyDoubtsWithImage(t *testing.T) {
 		t.Fatalf("las dudas debían quedar resueltas: %v", got)
 	}
 }
+
+// Una fecha de firma que no coincide con el cierre queda por confirmar y no
+// se usa para pasar otro convenio al historial.
+func TestExtractNoLinksRenewalWithDateToConfirm(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"choices":[{"message":{"content":"{\"tipo_documento\":\"Convenio General\",\"dependencia\":\"Secretaría de Salud\",\"fecha_firma\":\"2024-02-01\",\"vigencia_tipo\":\"indefinida\",\"etiquetas\":[],\"renovacion\":{\"es\":true,\"fecha_anterior\":\"2021-02-01\"}}"},"finish_reason":"stop"}]}`)
+	}))
+	defer srv.Close()
+	t.Setenv("CONVENIOS_DATA_DIR", t.TempDir())
+	paths, err := store.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	old, err := st.Insert(pdfutil.SavedFile{NombreGuardado: "33333333333333333333333333333333.pdf", NombreOriginal: "viejo.pdf", SHA256: "viejo2", Texto: "Convenio 2021"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Update(store.ConventionInput{ID: old, Dependencia: "Secretaría de Salud", TipoDocumento: "Convenio General", FechaFirma: "2021-02-01"}); err != nil {
+		t.Fatal(err)
+	}
+	texto := "Convenio que renueva el anterior.\nLeído que fue, lo firman en Chilpancingo, Guerrero, a los siete días del mes de febrero de dos mil veinticuatro."
+	id, err := st.Insert(pdfutil.SavedFile{NombreGuardado: "44444444444444444444444444444444.pdf", NombreOriginal: "Escaner2.pdf", SHA256: "nuevo2", Texto: texto})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &App{store: st, paths: paths, cfg: config.Config{AIEnabled: true, APIKey: "k", BaseURL: srv.URL, Model: "m", VisionModel: "v", AnalysisLevel: "low"}}
+	res, err := a.ExtractAI(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.RevisionFechas) != 1 || res.RevisionFechas[0].Propuesta != "2024-02-07" {
+		t.Fatalf("la firma debe quedar por confirmar con la fecha del cierre: %+v", res.RevisionFechas)
+	}
+	if res.Versiones != 0 {
+		t.Fatalf("con la firma por confirmar no se vincula la renovación: versiones=%d", res.Versiones)
+	}
+	if res, err = a.ConfirmDate(id, "firma"); err != nil || len(res.RevisionFechas) != 0 {
+		t.Fatalf("confirmar debe quitar la marca: %+v %v", res.RevisionFechas, err)
+	}
+}

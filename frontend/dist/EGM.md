@@ -30,6 +30,11 @@ Qué hay en la carpeta:
   - Duplicados y versiones: `ListDuplicates`, `DismissDuplicate`, `LinkVersion`, `UnlinkVersion`
   - Ajustes y sistema: `SaveSettings`, `BackupData`, `OpenDataFolder`, `CheckUpdate`, `ApplyUpdate`, `OpenReleasePage`
 
+**Fechas por confirmar**
+
+- `renderDateReviews` muestra, bajo las fechas de la ficha, un aviso por cada elemento de `revision_fechas` (motivo del servidor), y resalta el campo con `.is-unconfirmed`. Botones: «Usar dd/mm/aaaa» si hay `propuesta` (cambia el campo y marca la ficha sin guardar), «La fecha capturada es correcta» (`ConfirmDate`; si el campo tiene cambios sin guardar, pide guardar primero) y «Ver en el documento» (`openReview`) [app.js:renderDateReviews] [app.js:onDateReviewClick]
+- La lista pone la insignia «Fecha por confirmar» con `fechas_por_confirmar`. El botón `#btn-fechas` filtra con `solo_fechas_por_confirmar` y solo se ve si `stats.fechas_por_confirmar` es mayor que 0 o el filtro está activo [app.js:syncReviewButtons] [app.js:toggleFechasPorConfirmar]
+
 **Revisión puntual de la vigencia**
 
 - Los íconos `.field-locate` junto a Fecha de firma, Fecha de vigencia y Cláusula de vigencia llaman a `openReview('firma'|'vigencia'|'clausula')`. La vista `#review` reemplaza al `iframe` del PDF (que se oculta, no se recarga) y dibuja la página con PDF.js [app.js:openReview] [app.js:drawReviewPage]
@@ -151,7 +156,7 @@ Qué hay en la carpeta:
 - Una página con menos de 30 caracteres de texto (sin contar espacios) se considera escaneada. Una transcripción `completa` no se repite en automático [app.js:transcribeConvention] [app.js:processAutoFileOnce]
 - PDF.js decide por su cuenta qué páginas son escaneadas, y puede no coincidir con lo que marcó Go al importar. Si no encuentra ninguna, `transcribeConvention` devuelve `'sin_paginas'`; la cola automática da la transcripción por completa (`BeginTranscription(id, 0)`) y sigue con `ExtractAI`. Sin texto, `ExtractAI` deja el error en la ficha [app.js:processAutoFileOnce] [app.js:transcribeConvention]
 - Al arrancar, si `GetBootstrap` trae `aviso` (por ejemplo, ajustes dañados), se muestra como aviso de error. Si la búsqueda de actualizaciones falla, la insignia dice «No se pudo revisar» y el detalle queda en su `title` [app.js:renderUpdate]
-- Tamaño de las imágenes: las páginas se renderizan a 1600 px y JPEG 0.82, y para verificar dudas a 2400 px y JPEG 0.9 [app.js:renderPageJPEG] [app.js:verifyDoubts]
+- Tamaño de las imágenes: la escala es `min(maxScale, maxSide / lado mayor)`. Para transcribir, `maxSide` 2000 y `maxScale` 3 (una hoja carta queda en unos 1545×2000 px), JPEG 0.88. Para verificar dudas, 2800 y 4, JPEG 0.9. Antes de la 1.5.0 el tope de escala de 1.45 dejaba la página en unos 888×1149 px [app.js:renderPageJPEG] [app.js:verifyDoubts] [app.js:transcribeConvention]
 
 **Confirmaciones**
 

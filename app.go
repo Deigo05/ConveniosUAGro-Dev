@@ -30,7 +30,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.4.1"
+const appVersion = "1.5.0"
 
 // buildCommit y buildDate se fijan al compilar en GitHub Actions con
 // -ldflags "-X main.buildCommit=<sha> -X main.buildDate=<RFC3339>". En una
@@ -168,11 +168,24 @@ func (a *App) unifyCityNames() {
 	}
 }
 
-// refreshDuplicates recalcula las marcas de duplicados y renovaciones.
+// refreshDuplicates recalcula las marcas de duplicados y renovaciones, y
+// vuelve a comprobar las fechas de los convenios que cambiaron.
 func (a *App) refreshDuplicates() {
 	if err := a.store.RefreshDuplicates(); err != nil {
 		log.Printf("no se pudieron recalcular los duplicados: %v", err)
 	}
+	if err := a.store.RefreshDateChecks(); err != nil {
+		log.Printf("no se pudieron comprobar las fechas: %v", err)
+	}
+}
+
+// ConfirmDate registra que el usuario revisó la fecha ("firma" o "vigencia")
+// con el documento y es correcta.
+func (a *App) ConfirmDate(id int64, campo string) (store.ConventionDetail, error) {
+	if err := a.store.ConfirmDate(id, campo); err != nil {
+		return store.ConventionDetail{}, err
+	}
+	return a.store.Get(id)
 }
 
 func hasArg(flag string) bool {
@@ -1422,13 +1435,14 @@ func (a *App) Health() string {
 // renovación (misma contraparte, tipo y facultad) y más antiguos que este.
 func (a *App) linkRenewal(id int64, fechaAnterior string) {
 	d, err := a.store.Get(id)
-	if err != nil || d.FechaFirma == "" {
+	// Con la fecha de firma por confirmar no se sabe cuál es la anterior.
+	if err != nil || d.FechaFirma == "" || a.store.HasPendingFirma(id) {
 		return
 	}
 	var pick int64
 	pickDate := ""
 	for _, r := range d.Relacionados {
-		if r.Motivo != store.MotivoRenovacion || r.FechaFirma == "" || r.FechaFirma >= d.FechaFirma {
+		if r.Motivo != store.MotivoRenovacion || r.FechaFirma == "" || r.FechaFirma >= d.FechaFirma || a.store.HasPendingFirma(r.ID) {
 			continue
 		}
 		if fechaAnterior != "" && r.FechaFirma == fechaAnterior {

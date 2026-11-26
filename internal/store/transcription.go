@@ -158,6 +158,10 @@ func rebuildText(tx *sql.Tx, id int64) error {
 		return err
 	}
 	texto := strings.Join(parts, "\n\n")
-	_, err = tx.Exec("UPDATE convenios SET texto=?, huella=NULL WHERE id=?", texto, id)
+	if _, err = tx.Exec("UPDATE convenios SET texto=?, huella=NULL WHERE id=?", texto, id); err != nil {
+		return err
+	}
+	// El texto cambió: las fechas se vuelven a comprobar.
+	_, err = tx.Exec("DELETE FROM revision_fechas_hechas WHERE convenio_id=?", id)
 	return err
 }

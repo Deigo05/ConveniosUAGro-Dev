@@ -52,6 +52,10 @@ y la lectura de PDF viven en otros paquetes, y este solo guarda sus resultados. 
 - Constantes `MotivoArchivo`, `MotivoTexto`, `MotivoDatos` y `MotivoRenovacion`; `RefreshDuplicates()`, `DismissDuplicate(a, b)` y `ListDuplicates() ([]DuplicatePair, error)` [duplicates.go:MotivoArchivo] [duplicates.go:RefreshDuplicates] [duplicates.go:DismissDuplicate] [duplicates.go:ListDuplicates]
 - `LinkVersion(older, newer)`, `UnlinkVersion(id)` y `History(id) ([]VersionRef, int64, error)` [versions.go:LinkVersion] [versions.go:UnlinkVersion] [versions.go:History]
 
+### Fechas por confirmar
+- `RefreshDateChecks()` vuelve a comprobar con `fechas.Check` los convenios cuyo `dateCheckKey` cambió (actualizado_en, fechas, indefinida, calculada y largo del texto y de la cláusula). `rebuildText` borra su fila de `revision_fechas_hechas` para forzarlo. `DateReviews(id)`, `HasPendingFirma(id)`, `ConfirmDate(id, campo)`; `ListFilter.SoloFechasPorConfirmar`, `Stats.FechasPorConfirmar`, `ConventionSummary.FechasPorConfirmar` y `ConventionDetail.RevisionFechas` [date_checks.go:RefreshDateChecks] [date_checks.go:ConfirmDate] [transcription.go:rebuildText]
+- Una fila de `revision_fechas` existe solo si la fecha no coincide con el texto. Está por confirmar mientras `confirmada` sea NULL o distinta de `valor`, así que la confirmación del usuario se pierde si la fecha cambia. Las dos tablas se crean con `CREATE TABLE IF NOT EXISTS` sin subir el esquema: una versión anterior de la app las ignora [schema.sql:revision_fechas] [date_checks.go:checkDates]
+
 ### Revisión y mantenimiento
 - `Flag(name)` y `SetFlag(name)`: marcas en `meta` para las reparaciones que se aplican una sola vez [review.go:Flag] [review.go:SetFlag]
 - `SetNoConvenio`, `SetAIConvenioFlag`, `IsFlaggedNoConvenio`, `FlagNoConveniosFromNotes` y `AnalyzedConventions` [review.go:SetNoConvenio] [review.go:SetAIConvenioFlag] [review.go:FlagNoConveniosFromNotes] [review.go:AnalyzedConventions]

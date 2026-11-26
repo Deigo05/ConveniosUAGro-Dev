@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.5.0] - 2026-11-26
+
+Fechas de los convenios escaneados: se leen con más detalle y, cuando no cuadran con el documento, la app lo dice.
+
+### Agregado
+
+- **Fechas por confirmar**: la app compara la fecha de firma y la de vigencia que capturó la IA con lo que dice el propio texto del convenio. Para la firma usa el cierre («…lo firman… a los quince días del mes de…») y para la vigencia la cláusula («…hasta el 31 de diciembre de 2027»). Lo hace en la PC, sin gastar consultas de IA, y también revisa los convenios que ya estaban registrados. Marca la fecha como «por confirmar» cuando:
+  - no coincide con el documento;
+  - la transcripción la marcó como difícil de leer;
+  - la fecha en letra y la de número no coinciden («veinticinco (26)»);
+  - el cierre tiene rastros de una fecha que no se pudo leer completa;
+  - la vigencia termina antes de la firma.
+- **En la ficha**: bajo las fechas aparece un aviso amarillo que explica qué dice el documento. Tiene tres botones:
+  - «Usar 25/11/2025», cuando la fecha del documento se pudo leer;
+  - «La fecha capturada es correcta», para quitar el aviso; si la fecha cambia después, se vuelve a comprobar;
+  - «Ver en el documento».
+- **En la lista**: la insignia «Fecha por confirmar» y el botón **Fechas por confirmar (N)** para ver solo esos convenios.
+
+### Cambiado
+
+- **Más detalle al transcribir**: las páginas escaneadas se envían a la IA con cerca del triple de píxeles que antes (unos 1545×2000 en una hoja carta, antes unos 888×1149) y con mejor calidad de imagen. Las fechas pequeñas, tenues o bajo un sello se leen mejor, a cambio de un costo de IA algo mayor por página. La segunda revisión de las páginas dudosas también usa más detalle. Aplica a las transcripciones nuevas; para releer un convenio ya transcrito hay que volver a transcribirlo.
+- **Renovaciones**: si la fecha de firma de un convenio está por confirmar, la app ya no lo vincula sola como renovación de otro, porque con una fecha mal leída podría mandar la copia correcta al historial.
+
 ## [1.4.1] - 2026-11-26
 
 La fecha, señalada con precisión en «Ver en el documento».

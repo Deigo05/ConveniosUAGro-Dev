@@ -105,3 +105,25 @@ CREATE TABLE IF NOT EXISTS transcripcion_paginas (
 
 -- El índice de búsqueda (convenios_fts) y sus disparadores están en search.sql;
 -- se crean después de las migraciones porque dependen de la columna busqueda.
+
+-- Fechas que conviene confirmar con el documento (ver internal/fechas y
+-- RefreshDateChecks). Solo hay fila cuando la fecha no coincide con el texto;
+-- «valor» es la fecha guardada al comprobarla y «confirmada», la fecha que el
+-- usuario revisó y dio por buena (la marca vuelve si la fecha cambia).
+-- No requiere subir la versión del esquema: una versión anterior la ignora.
+CREATE TABLE IF NOT EXISTS revision_fechas (
+  convenio_id INTEGER NOT NULL REFERENCES convenios(id) ON DELETE CASCADE,
+  campo       TEXT NOT NULL CHECK (campo IN ('firma', 'vigencia')),
+  valor       TEXT NOT NULL DEFAULT '',
+  motivo      TEXT NOT NULL DEFAULT '',
+  propuesta   TEXT NOT NULL DEFAULT '',
+  cita        TEXT NOT NULL DEFAULT '',
+  confirmada  TEXT,
+  PRIMARY KEY (convenio_id, campo)
+) WITHOUT ROWID;
+
+-- Convenios ya comprobados y con qué datos (dateCheckKey).
+CREATE TABLE IF NOT EXISTS revision_fechas_hechas (
+  convenio_id INTEGER PRIMARY KEY REFERENCES convenios(id) ON DELETE CASCADE,
+  clave       TEXT NOT NULL
+);
