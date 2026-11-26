@@ -298,6 +298,11 @@ textarea { resize: vertical; min-height: 70px; }
 .field-locate:hover, .field-locate:focus-visible { background: var(--azul-claro); color: var(--azul); }
 .field.is-reviewing { border-left: 3px solid var(--oro); padding-left: 8px; margin-left: -11px; }
 .field.is-reviewing .field-locate { color: var(--oro-oscuro); }
+.field.is-unconfirmed input[type="date"] { border-color: #e09b2d; background: var(--ambar-claro); }
+.date-reviews { display: grid; gap: 8px; margin: 2px 0 12px; }
+.date-review { padding: 9px 11px; border: 1px solid #f0d29e; border-left: 3px solid #e09b2d; border-radius: var(--radio-sm); background: var(--ambar-claro); color: #6f4800; font-size: .8rem; }
+.date-review p { margin: 0 0 7px; line-height: 1.45; overflow-wrap: anywhere; }
+.date-review__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .review { flex: 1 1 auto; display: flex; flex-direction: column; gap: 8px; min-height: 520px; }
 .review[hidden] { display: none; }
 .review__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }

@@ -18,7 +18,7 @@ const state = {
   stats: {},
   config: {},
   app: {},
-  filters: { query: '', tag_ids: [], vigencia: '', solo_pendientes: false, solo_no_convenios: false, incluir_anteriores: false, order: 'id', dir: 'desc', page: 1 },
+  filters: { query: '', tag_ids: [], vigencia: '', solo_pendientes: false, solo_no_convenios: false, solo_fechas_por_confirmar: false, incluir_anteriores: false, order: 'id', dir: 'desc', page: 1 },
   result: { items: [], total: 0, total_registrados: 0, page: 1, pages: 1 },
   selected: new Set(),
   current: null,
@@ -143,6 +143,8 @@ function bindEvents() {
   $('#btn-tag-filter').addEventListener('click', toggleTagFilter);
   $('#btn-pending').addEventListener('click', togglePending);
   $('#btn-noconv').addEventListener('click', toggleNoConvenios);
+  $('#btn-fechas').addEventListener('click', toggleFechasPorConfirmar);
+  $('#date-reviews').addEventListener('click', onDateReviewClick);
   $('#btn-mark-noconv').addEventListener('click', () => setNoConvenio(true));
   $('#btn-clear-filters').addEventListener('click', clearFilters);
 
@@ -299,6 +301,7 @@ function renderStats() {
   $('#stats-vencidos').textContent = s.vencidos || 0;
   $('#pending-count').textContent = s.etiquetas_pendientes || 0;
   $('#noconv-count').textContent = s.no_convenios || 0;
+  $('#fechas-count').textContent = s.fechas_por_confirmar || 0;
   syncReviewButtons();
   $$('[data-stat-filter]').forEach(card => card.classList.toggle('is-active', card.dataset.statFilter !== '' && card.dataset.statFilter === state.filters.vigencia));
 }
@@ -313,7 +316,7 @@ function setVigencia(value) {
 }
 
 function emptyFilter() {
-  return { query: '', tag_ids: [], vigencia: '', solo_pendientes: false, solo_no_convenios: false, incluir_anteriores: false, archivados: false, order: 'id', dir: 'desc', page: 1 };
+  return { query: '', tag_ids: [], vigencia: '', solo_pendientes: false, solo_no_convenios: false, solo_fechas_por_confirmar: false, incluir_anteriores: false, archivados: false, order: 'id', dir: 'desc', page: 1 };
 }
 
 // syncReviewButtons muestra los atajos de revisión solo si hay algo que revisar
@@ -324,6 +327,8 @@ function syncReviewButtons() {
   $('#btn-pending').classList.toggle('is-active', Boolean(state.filters.solo_pendientes));
   $('#btn-noconv').hidden = (s.no_convenios || 0) === 0 && !state.filters.solo_no_convenios;
   $('#btn-noconv').classList.toggle('is-active', Boolean(state.filters.solo_no_convenios));
+  $('#btn-fechas').hidden = (s.fechas_por_confirmar || 0) === 0 && !state.filters.solo_fechas_por_confirmar;
+  $('#btn-fechas').classList.toggle('is-active', Boolean(state.filters.solo_fechas_por_confirmar));
 }
 
 // Con una búsqueda activa, el orden "Más recientes" se cambia por relevancia;
@@ -433,7 +438,7 @@ function updateSearchClear() {
 }
 
 function updateClearFilters() {
-  const active = Boolean(state.filters.query || state.filters.vigencia || state.filters.solo_pendientes || state.filters.solo_no_convenios || state.filters.tag_ids.length);
+  const active = Boolean(state.filters.query || state.filters.vigencia || state.filters.solo_pendientes || state.filters.solo_no_convenios || state.filters.solo_fechas_por_confirmar || state.filters.tag_ids.length);
   $('#btn-clear-filters').hidden = !active;
   $('#tag-filter-count').hidden = state.filters.tag_ids.length === 0;
   $('#tag-filter-count').textContent = state.filters.tag_ids.length;
@@ -466,6 +471,13 @@ function togglePending() {
 
 function toggleNoConvenios() {
   state.filters.solo_no_convenios = !state.filters.solo_no_convenios;
+  state.filters.page = 1;
+  updateClearFilters();
+  loadList();
+}
+
+function toggleFechasPorConfirmar() {
+  state.filters.solo_fechas_por_confirmar = !state.filters.solo_fechas_por_confirmar;
   state.filters.page = 1;
   updateClearFilters();
   loadList();
@@ -622,6 +634,10 @@ function rowHTML(c) {
     badges.push('<span class="badge" title="El PDF no tiene texto seleccionable">Sin texto</span>');
   }
   if (c.vigencia_calculada) badges.push('<span class="badge badge--blue">Calculada</span>');
+  if (c.fechas_por_confirmar && c.fechas_por_confirmar.length) {
+    const cuales = c.fechas_por_confirmar.map(f => DATE_REVIEW_LABELS[f] || f).join(' y ');
+    badges.unshift(`<span class="badge badge--amber" title="${esc(cuales)}: lo capturado no coincide con lo que dice el documento. Ábrelo para confirmarla.">Fecha por confirmar</span>`);
+  }
   if (c.no_es_convenio) badges.unshift('<span class="badge badge--violet" title="La IA cree que este archivo no es un convenio. Ábrelo para confirmarlo o eliminarlo.">¿No es convenio?</span>');
   if (c.reemplazado_por) badges.unshift('<span class="badge" title="Una versión renovada la reemplazó; se ve en su historial">Versión anterior</span>');
   if (c.duplicados) badges.unshift(`<button type="button" class="badge badge--red badge--link" data-goto-dups title="Revisar en Duplicados">Posible duplicado${c.duplicados > 1 ? ` (${c.duplicados})` : ''}</button>`);
@@ -716,7 +732,7 @@ function stateBadge(estado) {
 
 function renderSummary() {
   const r = state.result;
-  const filtered = Boolean(state.filters.query || state.filters.tag_ids.length || state.filters.vigencia || state.filters.solo_pendientes || state.filters.solo_no_convenios);
+  const filtered = Boolean(state.filters.query || state.filters.tag_ids.length || state.filters.vigencia || state.filters.solo_pendientes || state.filters.solo_no_convenios || state.filters.solo_fechas_por_confirmar);
   $('#list-summary').textContent = filtered
     ? `${r.total} resultado${r.total === 1 ? '' : 's'} con los filtros actuales · ${r.total_registrados} en total`
     : `${r.total_registrados} convenio${r.total_registrados === 1 ? '' : 's'} registrado${r.total_registrados === 1 ? '' : 's'}`;
@@ -882,6 +898,77 @@ function renderDetail() {
   renderRelations();
   renderNoConvenio();
   renderArchivedState();
+  renderDateReviews();
+}
+
+/* ---------- Fechas por confirmar ---------- */
+
+// El servidor compara las fechas capturadas con el texto del convenio (el
+// cierre y la cláusula de vigencia) y explica las que no coinciden. Aquí se
+// muestran junto a los campos, con la fecha que dice el documento.
+const DATE_REVIEW_LABELS = { firma: 'Fecha de firma', vigencia: 'Fecha de vigencia' };
+const DATE_REVIEW_INPUTS = { firma: '#f-firma', vigencia: '#f-vigencia' };
+
+function renderDateReviews() {
+  const c = state.current;
+  const el = $('#date-reviews');
+  const items = (c && c.revision_fechas) || [];
+  $$('.field.is-unconfirmed').forEach(f => f.classList.remove('is-unconfirmed'));
+  el.hidden = !items.length;
+  el.innerHTML = items.map(r => {
+    $(`.field[data-field="${r.campo}"]`)?.classList.add('is-unconfirmed');
+    const usar = r.propuesta
+      ? `<button type="button" class="btn btn--outline btn--small" data-date-use="${esc(r.campo)}" data-date-value="${esc(r.propuesta)}">Usar ${esc(formatDate(r.propuesta))}</button>`
+      : '';
+    return `<div class="date-review" data-campo="${esc(r.campo)}">
+      <p><strong>${esc(DATE_REVIEW_LABELS[r.campo] || r.campo)} por confirmar.</strong> ${esc(r.motivo)}</p>
+      <div class="date-review__actions">
+        ${usar}
+        <button type="button" class="btn btn--outline btn--small" data-date-confirm="${esc(r.campo)}">La fecha capturada es correcta</button>
+        <button type="button" class="btn btn--text btn--small" data-date-locate="${esc(r.campo)}">Ver en el documento</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function onDateReviewClick(e) {
+  const c = state.current;
+  if (!c) return;
+  const use = e.target.closest('[data-date-use]');
+  if (use) {
+    const input = $(DATE_REVIEW_INPUTS[use.dataset.dateUse]);
+    if (!input) return;
+    if (use.dataset.dateUse === 'vigencia' && $('#f-indefinida').checked) {
+      $('#f-indefinida').checked = false;
+      syncIndefinite(false);
+    }
+    input.value = use.dataset.dateValue;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+    showToast('Fecha cambiada. Guarda la ficha para conservarla.');
+    return;
+  }
+  const confirm = e.target.closest('[data-date-confirm]');
+  if (confirm) {
+    const campo = confirm.dataset.dateConfirm;
+    const saved = campo === 'firma' ? c.fecha_firma : c.fecha_vigencia;
+    if ((($(DATE_REVIEW_INPUTS[campo]) || {}).value || '') !== (saved || '')) {
+      showToast('Cambiaste esa fecha: guarda la ficha primero.');
+      return;
+    }
+    try {
+      state.current = await call('ConfirmDate', c.id, campo);
+      renderDateReviews();
+      await refreshData();
+      await loadList({ preserveSelection: true });
+      showToast('Fecha confirmada. Si cambia, se vuelve a comprobar.');
+    } catch (err) {
+      showToast(errorText(err), 'error');
+    }
+    return;
+  }
+  const locate = e.target.closest('[data-date-locate]');
+  if (locate) openReview(locate.dataset.dateLocate);
 }
 
 // renderArchivedState muestra si el convenio está archivado: en ese caso el
@@ -1547,7 +1634,7 @@ async function verifyDoubts(id, pdf = null) {
     doc = doc || await window.pdfjsLib.getDocument({ url: `/pdf/${id}` }).promise;
     const images = [];
     for (const n of pages) {
-      if (n >= 1 && n <= doc.numPages) images.push({ pagina: n, imagen: await renderPageJPEG(doc, n, 2400, 2.2, 0.9) });
+      if (n >= 1 && n <= doc.numPages) images.push({ pagina: n, imagen: await renderPageJPEG(doc, n, 2800, 4, 0.9) });
     }
     return images.length ? await textCall('VerifyAI', id, images) : null;
   } catch (err) {
@@ -1619,7 +1706,7 @@ async function transcribeConvention(id, options = {}) {
       await acquirePageSlot();
       try {
         if (failed) return;
-        const base64 = await renderPageJPEG(pdf, pageNumber, 1600, 1.45, 0.82);
+        const base64 = await renderPageJPEG(pdf, pageNumber, 2000, 3, 0.88);
         const status = await withRetries(
           () => call('TranscribePage', id, pageNumber, base64),
           PAGE_RETRY_DELAYS_MS,
@@ -2302,7 +2389,7 @@ async function exportCSV(ids, filter) {
 
 function isFiltered() {
   const f = state.filters;
-  return Boolean(f.query.trim() || f.tag_ids.length || f.vigencia || f.solo_pendientes || f.solo_no_convenios);
+  return Boolean(f.query.trim() || f.tag_ids.length || f.vigencia || f.solo_pendientes || f.solo_no_convenios || f.solo_fechas_por_confirmar);
 }
 
 // describeFilters resume el filtro activo: «Vencidos · Acapulco de Juárez».
@@ -2319,6 +2406,7 @@ function describeFilters() {
   }
   if (f.solo_pendientes) parts.push('por clasificar');
   if (f.solo_no_convenios) parts.push('no son convenios');
+  if (f.solo_fechas_por_confirmar) parts.push('fechas por confirmar');
   if (f.query.trim()) parts.push(`«${f.query.trim()}»`);
   return parts.join(' · ');
 }

@@ -35,12 +35,12 @@ Archivos de la raíz:
 **Interface**
 - **Instancia única.** Antes de abrir la base, `main` toma un mutex con nombre de Windows. Si otra ventana ya lo tiene, la trae al frente y sale. Con `--after-update` espera hasta 30 s a que la versión anterior lo suelte [main.go:main] [instance_windows.go:acquireInstance] [instance_windows.go:focusExisting]
 - **Errores al abrir.** Un error al abrir la app (base de un esquema más nuevo, migración fallida) se registra y se muestra en un cuadro de diálogo nativo antes de salir [main.go:fatal] [instance_windows.go:showFatal]
-- **`*App`.** `NewApp` crea una sola instancia de `*App`, que se pasa a `wails.Run` en `Bind`. Sus 49 métodos exportados son la API de la interfaz [main.go:main] [app.go:NewApp]
+- **`*App`.** `NewApp` crea una sola instancia de `*App`, que se pasa a `wails.Run` en `Bind`. Sus 50 métodos exportados son la API de la interfaz [main.go:main] [app.go:NewApp]
 - **Ventana.** Se llama «Convenios UAGro», mide 1320×860 (mínimo 1040×680) y usa `OnStartup`, `OnShutdown` y el middleware del servidor de recursos. Soltar archivos sobre la ventana entrega las rutas a la interfaz [main.go:main]
 - **Visor de PDF.** La ruta `GET /pdf/<id>` sirve el PDF guardado, solo con un id numérico, y responde 404 si el id no es válido o no existe [app.go:(*App).middleware]
 - **Métodos publicados, por grupo:**
   - Arranque: `GetBootstrap`
-  - Lista y ficha: `ListConvenios`, `GetConvenio`, `SaveConvenio`, `DeleteConvenios`, `SetNoConvenio`
+  - Lista y ficha: `ListConvenios`, `GetConvenio`, `SaveConvenio`, `DeleteConvenios`, `SetNoConvenio`, `ConfirmDate`
   - Importación de PDF: `ChoosePDFs`, `CheckImport`, `ImportPDFs`
   - Etiquetas y sugerencias: `GetTags`, `CreateTag`, `UpdateTag`, `DeleteTag`, `SaveConvenioTags`, `AcceptSuggestions`, `DiscardSuggestions`
   - IA: `ExtractAI`, `PagesToVerify`, `VerifyAI`
