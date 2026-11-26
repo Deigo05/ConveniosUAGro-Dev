@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.1] - 2026-11-26
+
+La fecha, señalada con precisión en «Ver en el documento».
+
+### Agregado
+
+- **Fecha resaltada**: dentro del recuadro, la fecha va marcada en amarillo, como con un resaltador. El recuadro queda más tenue y sirve de contexto. La vista se centra en la marca.
+- **Fecha de firma**: se marcan las fechas del cierre, incluidas las escritas con letra y con el número entre paréntesis («a los veinticinco (25) días del mes de noviembre del año dos mil veinticinco (2025)») y las que llevan diagonales («25/11/2025»).
+- **Fecha de vigencia y Cláusula de vigencia**: se marcan las fechas y los plazos de la cláusula («tres (3) años», «36 meses», «por tiempo indefinido»). Los avisos de terminación («con 30 días naturales de anticipación») no se marcan.
+- **Páginas escaneadas**: en el fragmento transcrito, la fecha va resaltada.
+- Como siempre, se marca lo que dice el documento, no lo que capturó la IA. Si una fecha no se puede ubicar con precisión, queda solo el recuadro.
+
 ## [1.4.0] - 2026-11-25
 
 Revisión puntual de la vigencia: comparar lo que capturó la IA con el documento sin salir de la ficha.

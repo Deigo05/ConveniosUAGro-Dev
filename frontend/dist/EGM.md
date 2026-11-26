@@ -7,7 +7,7 @@ Esta carpeta es la interfaz de la app de escritorio (Wails v2). **Aunque se llam
 Qué hay en la carpeta:
 
 - `index.html`: el esqueleto con todas las vistas y diálogos.
-- `revision.js`: funciones puras de la revisión puntual de la vigencia (índice de texto por página, búsqueda del cierre y de la cláusula, recuadros). Expone el global `Revision` en la WebView y `module.exports` en Node para las pruebas de `frontend/tests/`.
+- `revision.js`: funciones puras de la revisión puntual de la vigencia (índice de texto por página, búsqueda del cierre y de la cláusula, marcas de fecha y plazo, recuadros). Expone el global `Revision` en la WebView y `module.exports` en Node para las pruebas de `frontend/tests/`.
 - `app.js`: unas 3,500 líneas de JavaScript plano (`'use strict'`, sin módulos ni bundler). Todas sus funciones y constantes son globales de un solo script.
 - `styles.css`: los estilos (no se documentan aquí).
 - `vendor/`: PDF.js de terceros (`pdf.min.js`, `pdf.worker.min.js`). No se edita.
@@ -34,6 +34,7 @@ Qué hay en la carpeta:
 
 - Los íconos `.field-locate` junto a Fecha de firma, Fecha de vigencia y Cláusula de vigencia llaman a `openReview('firma'|'vigencia'|'clausula')`. La vista `#review` reemplaza al `iframe` del PDF (que se oculta, no se recarga) y dibuja la página con PDF.js [app.js:openReview] [app.js:drawReviewPage]
 - Fecha de firma busca el cierre con `Revision.findClosings`, de la última página a la primera, y muestra el primer candidato sin esperar a terminar. Fecha de vigencia y Cláusula buscan el texto de `#f-vigencia-texto` tal como está escrito (aunque no se haya guardado) con `Revision.findClause` [app.js:openReview] [revision.js:findClosings] [revision.js:findClause]
+- Dentro de cada coincidencia, `Revision.findMarks` busca las fechas (firma) o las fechas y los plazos en años o meses o indefinidos (vigencia y cláusula), sin los avisos «de anticipación» o «antes». `drawReviewPage` dibuja el recuadro (`.review-region`) y encima un resaltador (`.review-mark`) por marca, y centra la vista en la primera. En las transcripciones, `Revision.snippetParts` parte el fragmento para mostrar la fecha con `<mark>` [revision.js:findMarks] [app.js:reviewCandidate] [app.js:drawReviewPage]
 - Página con 30 caracteres o más en PDF.js: se busca en su texto. Si no, en su transcripción (`GetTranscription`, separada por `[Página N]` con `Revision.splitTranscription`). Sin texto ni transcripción no se busca [app.js:reviewPageData]
 
   [app.js:call] [app.js:setArchived]
@@ -176,7 +177,7 @@ Qué hay en la carpeta:
 
 **Revisión puntual: reglas**
 
-- Solo hay recuadro si `Revision.matchRects` devuelve rectángulos: fragmentos contiguos de PDF.js, sin texto girado, sin saltos de columna ni de párrafo (más de 1.8 renglones). Si devuelve `null`, la página se muestra sin recuadro; nunca uno aproximado [revision.js:matchRects]
+- Solo hay recuadro si `Revision.matchRects` devuelve rectángulos: fragmentos contiguos de PDF.js, sin texto girado, sin saltos de columna ni de párrafo (más de 1.8 renglones). Si devuelve `null`, la página se muestra sin recuadro; nunca uno aproximado. Lo mismo para cada marca: solo se dibuja si su tramo está dentro de la coincidencia y `matchRects` lo ubica [revision.js:matchRects] [app.js:reviewCandidate]
 - Las páginas transcritas nunca llevan recuadro: muestran la frase transcrita y el aviso «Según la transcripción de la IA; compare con la imagen», porque esa transcripción la escribió y corrigió la propia IA [app.js:renderReviewHead]
 - La vista se cierra (y su documento de PDF.js se destruye) con «Volver al PDF completo», al salir de la ficha, al abrir otro convenio y cuando terminan `ExtractAI`, `VerifyAI` o `FinishTranscription` de ese convenio (`textCall`). Redibujar la ficha del mismo convenio no la cierra [app.js:closeReview] [app.js:textCall] [app.js:renderDetail] [app.js:showView]
 - Cada búsqueda lleva un `token`: si se hace clic en otro campo o se cierra la vista, la búsqueda anterior se descarta sin tocar la pantalla [app.js:openReview]

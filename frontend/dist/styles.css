@@ -315,6 +315,9 @@ textarea { resize: vertical; min-height: 70px; }
 #review-canvas { display: block; background: #fff; }
 #review-boxes { position: absolute; inset: 0; pointer-events: none; }
 #review-boxes > div { position: absolute; border: 2px solid var(--oro); background: rgba(196, 154, 44, .15); border-radius: 2px; }
+#review-boxes.has-marks > .review-region { border-color: rgba(196, 154, 44, .55); border-width: 1.5px; background: rgba(196, 154, 44, .06); }
+#review-boxes > .review-mark { border: 0; border-radius: 1px; background: rgba(255, 214, 0, .55); mix-blend-mode: multiply; }
+#review-snippet mark { background: rgba(255, 214, 0, .55); color: inherit; padding: 0 1px; border-radius: 1px; }
 .review__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .review__pager { display: flex; align-items: center; gap: 2px; font-size: .78rem; color: var(--gris-oscuro); font-variant-numeric: tabular-nums; }
 .review__sep { margin: 0 6px; color: #b9c0cc; }

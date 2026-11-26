@@ -234,3 +234,85 @@ test('un párrafo con sangría en el primer renglón sí lleva recuadro', () => 
   const ix = R.buildPageIndex([it('DÉCIMA. El presente', 108, 300, true), it('convenio tendrá vigencia', 72, 286)]);
   assert.equal(R.matchRects(ix, ...find(ix, 'presente convenio')).length, 2);
 });
+
+/* ---------- Marcas de fecha y plazo ---------- */
+
+const marks = (s, kind, from, to) => {
+  const ix = idx(s);
+  return R.findMarks(ix, from ?? 0, to ?? ix.text.length, kind).map(m => ix.text.slice(m.start, m.end).trim());
+};
+
+test('firma: fecha en letra con números entre paréntesis y año en letra', () => {
+  assert.deepEqual(
+    marks('a los veinticinco (25) días del mes de noviembre del año dos mil veinticinco (2025).', 'firma'),
+    ['veinticinco 25 dias del mes de noviembre del ano dos mil veinticinco 2025']);
+});
+
+test('firma: fecha en número con año', () => {
+  assert.deepEqual(marks('Chilpancingo, Gro., 25 de noviembre de 2025', 'firma'), ['25 de noviembre de 2025']);
+});
+
+test('firma: fecha con diagonales', () => {
+  assert.deepEqual(marks('firmado el 25/11/2025', 'firma'), ['25 11 2025']);
+});
+
+test('firma: los plazos no se marcan', () => {
+  assert.deepEqual(marks('por tres (3) años, el 1o. de enero de 2025', 'firma'), ['1o de enero de 2025']);
+});
+
+test('vigencia: plazo y fecha límite', () => {
+  assert.deepEqual(
+    marks('tendrá una vigencia de tres (3) años y estará vigente hasta el 31 de diciembre de 2027.', 'vigencia'),
+    ['tres 3 anos', '31 de diciembre de 2027']);
+});
+
+test('vigencia: plazo en meses e indefinido', () => {
+  assert.deepEqual(marks('una vigencia de 36 meses', 'vigencia'), ['36 meses']);
+  assert.deepEqual(marks('tendrá vigencia por tiempo indefinido', 'vigencia'), ['tiempo indefinido']);
+  assert.deepEqual(marks('su vigencia será indefinida', 'vigencia'), ['indefinida']);
+});
+
+test('vigencia: treinta y uno en letra', () => {
+  assert.deepEqual(marks('hasta el treinta y uno de diciembre de dos mil veintisiete', 'vigencia'),
+    ['treinta y uno de diciembre de dos mil veintisiete']);
+});
+
+test('vigencia: los avisos de terminación no se marcan', () => {
+  assert.deepEqual(marks('dando aviso con 30 días naturales de anticipación', 'vigencia'), []);
+  assert.deepEqual(marks('dando aviso con tres meses de anticipación', 'vigencia'), []);
+  assert.deepEqual(marks('avisando dos meses antes de su terminación', 'vigencia'), []);
+});
+
+test('las marcas no salen del tramo pedido', () => {
+  const s = 'el 1 de enero de 2020. Lo firman a los 25 días del mes de noviembre de 2025';
+  const ix = idx(s);
+  const from = ix.text.indexOf('lo firman');
+  assert.deepEqual(marks(s, 'firma', from), ['25 dias del mes de noviembre de 2025']);
+  const cut = ix.text.indexOf(' de 2025');
+  assert.deepEqual(marks(s, 'firma', from, cut), ['25 dias del mes de noviembre']);
+});
+
+test('snippetParts separa el texto original en tramos normales y marcados', () => {
+  const ix = idx('Firmado a los 25 días del mes de noviembre de 2025, en Chilpancingo.');
+  const end = ix.text.trimEnd().length;
+  const parts = R.snippetParts(ix, 0, end, R.findMarks(ix, 0, end, 'firma'));
+  assert.deepEqual(parts, [
+    { text: 'Firmado a los ', mark: false },
+    { text: '25 días del mes de noviembre de 2025', mark: true },
+    { text: ', en Chilpancingo', mark: false }
+  ]);
+});
+
+test('snippetParts sin marcas da el mismo texto que snippet', () => {
+  const ix = idx('a los Quince días.');
+  const s = ix.text.indexOf('quince');
+  assert.deepEqual(R.snippetParts(ix, s, s + 'quince dias'.length, []), [{ text: 'Quince días', mark: false }]);
+});
+
+test('la marca incluye el paréntesis que cierra el número', () => {
+  const ix = idx('a los quince (15) días del mes de agosto del año dos mil veinticinco (2025).');
+  const end = ix.text.trimEnd().length;
+  const parts = R.snippetParts(ix, 0, end, R.findMarks(ix, 0, end, 'firma'));
+  assert.deepEqual(parts.filter(p => p.mark).map(p => p.text),
+    ['quince (15) días del mes de agosto del año dos mil veinticinco (2025)']);
+});
