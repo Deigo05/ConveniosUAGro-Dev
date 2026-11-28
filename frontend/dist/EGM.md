@@ -56,7 +56,7 @@ Qué hay en la carpeta:
   - duplicados (`dups`, `dupCompare`) y archivados (`arch`)
 
   [app.js:state]
-- Constantes: `TYPE_ORDER`, `TYPE_LABEL`, `PALETTE`, `EXCLUSIVE_TYPES`, `UPDATE_INTERVAL_MS` (6 h), `AUTO_FILES_AT_ONCE` (3), `PAGES_AT_ONCE` (10), `PAGE_RETRY_DELAYS_MS`, `FILE_RETRY_DELAYS_MS`, `MAX_IMPORT` (60) y `MOTIVO` (motivos de duplicado) [app.js:TYPE_ORDER] [app.js:EXCLUSIVE_TYPES] [app.js:MAX_IMPORT] [app.js:MOTIVO]
+- Constantes: `TYPE_ORDER`, `TYPE_LABEL`, `PALETTE`, `EXCLUSIVE_TYPES`, `UPDATE_INTERVAL_MS` (6 h), `AUTO_FILES_AT_ONCE` (3), `PAGES_AT_ONCE` (10), `PAGE_RETRY_DELAYS_MS`, `FILE_RETRY_DELAYS_MS`, `MAX_IMPORT` (200) y `MOTIVO` (motivos de duplicado) [app.js:TYPE_ORDER] [app.js:EXCLUSIVE_TYPES] [app.js:MAX_IMPORT] [app.js:MOTIVO]
 
 **Funciones por área**
 
@@ -174,7 +174,9 @@ Qué hay en la carpeta:
 
 **Importación**
 
-- Máximo `MAX_IMPORT` (60) PDF por tanda.
+- Máximo `MAX_IMPORT` (200) PDF por tanda.
+- La cola de procesamiento con IA se guarda en la base (Go: `QueuePending`, `EnqueueAI`, `DequeueAI`, `ClearQueue`). `startAutoAI` encola y arranca; `runAutoAIQueue` procesa de `AUTO_FILES_AT_ONCE` en adelante y saca cada archivo al terminar. Cada tanda lleva `autoRunSeq` para no apagarse entre sí [app.js:startAutoAI] [app.js:runAutoAIQueue]
+- «Pausar» (`state.autoPaused`) corta al inicio de la siguiente página o archivo; `transcribeConvention` lanza `pausadoError()` sin `FailTranscription`, y el worker devuelve el archivo al frente. Al abrir no se procesa nada solo: el aviso muestra «N en cola · Continuar · Quitar»; «Continuar» suma `QueuePending` y `RetryCandidates` [app.js:renderProcessingBanner] [app.js:continueQueue] [app.js:transcribeConvention]
 - Los repetidos (`duplicate_id` o `repetido`) se excluyen salvo que se marque «Importar de todos modos». Los que tienen error nunca se importan.
 - Solo se aceptan archivos soltados `.pdf`, `.zip` o `.db`, y se ignoran si hay un diálogo abierto.
 

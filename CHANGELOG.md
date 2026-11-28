@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.6.0] - 2026-11-27
+
+Importar más convenios de una vez y dejar el procesamiento con IA en pausa para otro momento.
+
+### Agregado
+
+- **Hasta 200 PDF por importación** (antes 60).
+- **Pausar y continuar**: el aviso de procesamiento tiene «Pausar». La pausa actúa en la siguiente página: lo que ya se envió queda guardado, nada se marca como error y el convenio vuelve al frente de la cola. «Continuar» retoma donde se quedó, con las páginas ya transcritas.
+- **La cola se guarda**: si cierras la aplicación a media carga, los pendientes siguen ahí. Al abrir, el aviso dice cuántos convenios esperan y ofrece «Continuar» y «Quitar». Nada se procesa solo, para que la IA no gaste sin que lo pidas.
+
+### Cambiado
+
+- **Los reintentos al abrir** ya no arrancan solos: los convenios que quedaron con error o con la transcripción incompleta se suman a la cola cuando pulsas «Continuar».
+
 ## [1.5.0] - 2026-11-26
 
 Fechas de los convenios escaneados: se leen con más detalle y, cuando no cuadran con el documento, la app lo dice.

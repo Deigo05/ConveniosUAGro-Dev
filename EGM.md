@@ -35,7 +35,7 @@ Archivos de la raíz:
 **Interface**
 - **Instancia única.** Antes de abrir la base, `main` toma un mutex con nombre de Windows. Si otra ventana ya lo tiene, la trae al frente y sale. Con `--after-update` espera hasta 30 s a que la versión anterior lo suelte [main.go:main] [instance_windows.go:acquireInstance] [instance_windows.go:focusExisting]
 - **Errores al abrir.** Un error al abrir la app (base de un esquema más nuevo, migración fallida) se registra y se muestra en un cuadro de diálogo nativo antes de salir [main.go:fatal] [instance_windows.go:showFatal]
-- **`*App`.** `NewApp` crea una sola instancia de `*App`, que se pasa a `wails.Run` en `Bind`. Sus 50 métodos exportados son la API de la interfaz [main.go:main] [app.go:NewApp]
+- **`*App`.** `NewApp` crea una sola instancia de `*App`, que se pasa a `wails.Run` en `Bind`. Sus 54 métodos exportados son la API de la interfaz [main.go:main] [app.go:NewApp]
 - **Ventana.** Se llama «Convenios UAGro», mide 1320×860 (mínimo 1040×680) y usa `OnStartup`, `OnShutdown` y el middleware del servidor de recursos. Soltar archivos sobre la ventana entrega las rutas a la interfaz [main.go:main]
 - **Visor de PDF.** La ruta `GET /pdf/<id>` sirve el PDF guardado, solo con un id numérico, y responde 404 si el id no es válido o no existe [app.go:(*App).middleware]
 - **Métodos publicados, por grupo:**
@@ -50,6 +50,7 @@ Archivos de la raíz:
   - Descargas y exportación: `DownloadPDF`, `DownloadPDFs`, `DownloadPDFsFiltered`, `ExportConvenios`, `ExportConveniosCSV`, `BackupData`
   - Paquetes: `ChooseImportFile`, `ImportConvenios`
   - Duplicados y versiones: `ListDuplicates`, `DismissDuplicate`, `LinkVersion`, `UnlinkVersion`
+  - Cola de procesamiento: `QueuePending`, `EnqueueAI`, `DequeueAI`, `ClearQueue` (ver «Cola de procesamiento» en las reglas)
   - Ajustes: `GetSettings`, `SaveSettings`, `OpenDataFolder`
   - Actualización: `CheckUpdate`, `ApplyUpdate`, `OpenReleasePage`
   - Diagnóstico: `Health`
@@ -140,6 +141,14 @@ Archivos de la raíz:
   [internal/config/config.go:Config.ToView] [internal/config/config.go:Apply]
 - **Volumen.** `RefreshDuplicates` compara todos los pares (O(n²)) y reescribe la tabla de duplicados de forma síncrona tras casi cada cambio, sobre una sola conexión SQLite. Medido: unos 28 ms con 1000 convenios; la lista tarda unos 3 ms. Escala bien hasta unos pocos miles [internal/store/duplicates.go:RefreshDuplicates]
 
+**Cola de procesamiento**
+
+- `cola_procesamiento` guarda los convenios que esperan transcribirse y analizarse con IA; el orden es el de encolado. Se crea con `CREATE TABLE IF NOT EXISTS` y no sube `user_version`: una versión anterior la ignora. Quien procesa es la interfaz, no Go [schema.sql:cola_procesamiento] [queue.go:EnqueueForAI]
+- Al importar con la IA activa, la interfaz encola los archivos nuevos (`EnqueueAI`) y procesa de tres en tres; al terminar un archivo lo saca (`DequeueAI`). Un archivo que falla de verdad también sale de la cola y queda con su error visible [app.js:startAutoAI] [app.js:runAutoAIQueue]
+- Al abrir no se procesa nada solo: `GetBootstrap` informa `cola_pendientes`, `startup` limpia las filas ya resueltas (`PruneQueue`) y el aviso ofrece «Continuar» y «Quitar». «Continuar» suma la cola y los candidatos de reintento (`RetryCandidates`) y arranca [app.go:startup] [app.js:continueQueue]
+- «Pausar» actúa en el siguiente límite de página o de archivo: la página en curso termina y se guarda, no se llama a `FailTranscription` ni se suman rondas de reintento, y el archivo vuelve al frente de la cola. Lo ya transcrito se retoma con `ResumeTranscription` [app.js:renderProcessingBanner] [app.js:transcribeConvention]
+- Cada tanda de la cola lleva número (`autoRunSeq`): si «Continuar» arranca una mientras la anterior cierra, la anterior no apaga el indicador de la nueva [app.js:runAutoAIQueue]
+
 ## Global Side Effects
 - **Carpeta de datos.** Es `%APPDATA%\ConveniosUAGro\`, `os.UserConfigDir()` fuera de Windows, o `CONVENIOS_DATA_DIR`. Se crea al arrancar y contiene:
   - `convenios.db` (+ `-wal`, `-shm`) y `pdfs/`
@@ -152,7 +161,7 @@ Archivos de la raíz:
 - **Arranque, en orden:**
   - `store.Open` carga las etiquetas base, pasa a `pendiente` las transcripciones `en_proceso` y marca como error los análisis `pendiente` («Análisis interrumpido»).
   - `startup`, con `tagMu`, aplica las sugerencias pendientes, asigna el estado de las ciudades, unifica los nombres de municipio y repara las etiquetas de facultad. Corre una sola vez en la vida de la base, protegida por una bandera, la reparación de etiquetas obligatorias, y marca «Convenio Abierto» donde falta.
-  - En segundo plano: el recálculo de duplicados y la limpieza del `.old` (hasta 10 intentos cada 2 s).
+  - En segundo plano: el recálculo de duplicados y la limpieza del `.old` (hasta 10 intentos cada 2 s). `startup` también limpia la cola de procesamiento de los convenios ya resueltos.
   - `ImportConvenios` repite, con `tagMu`, la unificación de municipios, la reparación de facultades y «Convenio Abierto».
 
   [internal/store/store.go:Open] [app.go:(*App).startup] [app.go:(*App).ImportConvenios]
