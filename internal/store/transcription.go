@@ -118,6 +118,14 @@ func (s *Store) FinishTranscription(id int64) (TranscriptionStatus, error) {
 	return s.GetTranscription(id)
 }
 
+// SuspendTranscription deja la transcripción en «pendiente» sin borrar las
+// páginas ya transcritas: es lo que pasa al pausar la cola.
+func (s *Store) SuspendTranscription(id int64) error {
+	_, err := s.db.Exec(`UPDATE convenios SET transcripcion_estado='pendiente', transcripcion_error=''
+		WHERE id=? AND transcripcion_estado='en_proceso'`, id)
+	return err
+}
+
 // GetTranscription devuelve el estado y el texto del convenio.
 func (s *Store) GetTranscription(id int64) (TranscriptionStatus, error) {
 	var st TranscriptionStatus

@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS cola_procesamiento (
 ### 6. Final de cada archivo
 
 - Si termina con datos (`ok` o `parcial`): se borra su fila de la cola.
-- Si falla definitivamente tras los reintentos de la sesión: **se queda en la cola** con `ia_estado='error'`; así «Continuar» del siguiente día lo vuelve a intentar y el aviso sigue diciendo cuántos hay. Quitarlo es decisión del usuario («Quitar»). Dentro de una misma sesión no se repite solo: el límite de reintentos de `withRetries` lo corta.
+- Si falla definitivamente tras los reintentos de la sesión: se borra su fila y queda `ia_estado='error'` en la ficha, con el botón de reintentar de siempre. No se queda en un ciclo que gaste sin fin.
 - El contador del aviso sale de las filas de la cola, así que sobrevive a cerrar la app y a un apagón.
 
 ## Lo que no cambia

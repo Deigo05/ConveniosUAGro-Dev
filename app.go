@@ -207,6 +207,12 @@ func (a *App) DequeueAI(id int64) error {
 	return a.store.Dequeue(id)
 }
 
+// PauseTranscription deja la transcripción en «pendiente» sin borrar lo ya
+// transcrito, para que la cola la retome después.
+func (a *App) PauseTranscription(id int64) error {
+	return a.store.SuspendTranscription(id)
+}
+
 // ClearQueue vacía la cola sin tocar los convenios.
 func (a *App) ClearQueue() error {
 	return a.store.ClearQueue()

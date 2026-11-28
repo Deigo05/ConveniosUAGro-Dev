@@ -146,3 +146,32 @@ func TestQueueSurvivesReopen(t *testing.T) {
 		t.Fatalf("la cola no sobrevivió: %v", got)
 	}
 }
+
+// Al pausar, la transcripción vuelve a «pendiente» y conserva sus páginas.
+func TestSuspendTranscriptionKeepsPages(t *testing.T) {
+	st, _ := testStore(t)
+	id := insertSample(t, st, "pausa")
+	if err := st.BeginTranscription(id, 3); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.SaveTranscriptionPage(id, 1, "página uno"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetIAStatus(id, "error", "el servicio falló"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SuspendTranscription(id); err != nil {
+		t.Fatal(err)
+	}
+	stt, err := st.GetTranscription(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stt.Estado != "pendiente" || stt.PaginasTranscritas != 1 {
+		t.Fatalf("tras pausar: estado=%q paginas=%d", stt.Estado, stt.PaginasTranscritas)
+	}
+	done, err := st.ResumeTranscription(id, 3)
+	if err != nil || len(done) != 1 || done[0] != 1 {
+		t.Fatalf("retomar = %v, %v", done, err)
+	}
+}
