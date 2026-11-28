@@ -589,7 +589,7 @@ func TestQueueBootstrapAndPrune(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.EnqueueAI([]int64{id}); err != nil {
+	if err := a.EnqueueAI([]int64{id}, false); err != nil {
 		t.Fatal(err)
 	}
 	b, err := a.GetBootstrap()
@@ -602,14 +602,22 @@ func TestQueueBootstrapAndPrune(t *testing.T) {
 	if got, _ := a.QueuePending(); len(got) != 1 || got[0] != id {
 		t.Fatalf("QueuePending = %v", got)
 	}
-	if err := st.SetAIResult(id, store.ConventionInput{ID: id, Dependencia: "X"}, "ok", nil, ""); err != nil {
+	// La limpieza que corre al arrancar no borra una importación fresca.
+	if err := st.PruneQueue(); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.PruneQueue(); err != nil {
+	if got, _ := a.QueuePending(); len(got) != 1 || got[0] != id {
+		t.Fatalf("la limpieza perdió una importación fresca: %v", got)
+	}
+	// Cuando el convenio se resuelve, QueuePending lo saca de la cola.
+	if err := st.SetAIResult(id, store.ConventionInput{ID: id, Dependencia: "X"}, "ok", nil, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := a.QueuePending(); len(got) != 0 {
 		t.Fatalf("un convenio resuelto sigue en cola: %v", got)
+	}
+	if b, err := a.GetBootstrap(); err != nil || b.ColaPendientes != 0 {
+		t.Fatalf("cola_pendientes tras podar = %d, %v", b.ColaPendientes, err)
 	}
 }
 
@@ -633,5 +641,8 @@ func TestImportPDFsCap200(t *testing.T) {
 	res := a.ImportPDFs(rutas)
 	if len(res) != 200 {
 		t.Fatalf("ImportPDFs procesó %d rutas; esperaba 200", len(res))
+	}
+	if vacio := a.ImportPDFs(nil); len(vacio) != 0 {
+		t.Fatalf("ImportPDFs(nil) devolvió %d resultados", len(vacio))
 	}
 }

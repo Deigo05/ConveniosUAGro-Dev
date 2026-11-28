@@ -246,6 +246,9 @@ func (s *Store) CloneAnalysis(src, dst int64) (bool, error) {
 	if ia != "ok" && ia != "parcial" && trans != "completa" {
 		return false, nil
 	}
+	// Con solo la transcripción copiada el convenio todavía necesita la
+	// extracción: se copia lo que hay, pero se avisa que falta la IA.
+	datosCopiados := ia == "ok" || ia == "parcial"
 	tx, err := s.db.Begin()
 	if err != nil {
 		return false, err
@@ -277,5 +280,5 @@ func (s *Store) CloneAnalysis(src, dst int64) (bool, error) {
 	if _, err := tx.Exec("INSERT INTO convenio_etiquetas (convenio_id, etiqueta_id) SELECT ?, etiqueta_id FROM convenio_etiquetas WHERE convenio_id=?", dst, src); err != nil {
 		return false, err
 	}
-	return true, tx.Commit()
+	return datosCopiados, tx.Commit()
 }

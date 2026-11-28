@@ -54,7 +54,8 @@ y la lectura de PDF viven en otros paquetes, y este solo guarda sus resultados. 
 
 ### Cola de procesamiento
 - `cola_procesamiento` (id autoincremental, `convenio_id` único con `ON DELETE CASCADE`) guarda los convenios pendientes de transcribir y analizar; el orden es el del `id`. Sin subir `user_version` [schema.sql:cola_procesamiento]
-- `EnqueueForAI(ids)`, `Dequeue(id)`, `QueuedIDs()`, `QueueCount()`, `PruneQueue()` y `ClearQueue()` [queue.go:EnqueueForAI] [queue.go:QueuedIDs]
+- `EnqueueForAI(ids, reanalisis)`, `Dequeue(id)`, `QueuedIDs()`, `QueueCount()`, `PruneQueue()` y `ClearQueue()` [queue.go:EnqueueForAI] [queue.go:QueuedIDs]
+- La columna `reanalisis` marca el análisis pedido a mano sobre un convenio ya analizado; `PruneQueue` conserva esas filas aunque `ia_estado` sea `ok`, y también las transcripciones pendientes y los convenios con error. Borra filas huérfanas, archivadas y las de convenios resueltos sin transcripción pendiente [schema.sql:cola_procesamiento] [queue.go:PruneQueue]
 - `EnqueueForAI` inserta con `INSERT OR IGNORE … SELECT id FROM convenios`: un id repetido no se duplica y uno inexistente no falla. `PruneQueue` borra las filas de convenios ya resueltos (`ia_estado` `ok` o `parcial`) o archivados, y conserva los que quedaron con error para que el usuario decida [queue.go:PruneQueue]
 
 ### Fechas por confirmar

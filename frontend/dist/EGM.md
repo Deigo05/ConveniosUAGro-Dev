@@ -175,7 +175,7 @@ Qué hay en la carpeta:
 **Importación**
 
 - Máximo `MAX_IMPORT` (200) PDF por tanda.
-- La cola de procesamiento con IA se guarda en la base (Go: `QueuePending`, `EnqueueAI`, `DequeueAI`, `ClearQueue`). `startAutoAI` encola y arranca; `runAutoAIQueue` procesa de `AUTO_FILES_AT_ONCE` en adelante y saca cada archivo al terminar. Cada tanda lleva `autoRunSeq` para no apagarse entre sí [app.js:startAutoAI] [app.js:runAutoAIQueue]
+- La cola de procesamiento con IA se guarda en la base (Go: `QueuePending`, `EnqueueAI`, `DequeueAI`, `ClearQueue`). `startAutoAI` encola y arranca; `runAutoAIQueue` procesa de `AUTO_FILES_AT_ONCE` en adelante y saca cada archivo al terminar bien; si falla, lo deja en la cola para «Continuar» y «Quitar». Cada tanda lleva `autoRunSeq` para no apagarse entre sí [app.js:startAutoAI] [app.js:runAutoAIQueue]
 - «Pausar» (`state.autoPaused`) corta al inicio de la siguiente página o archivo; `transcribeConvention` lanza `pausadoError()` sin `FailTranscription`, y el worker devuelve el archivo al frente. Al abrir no se procesa nada solo: el aviso muestra «N en cola · Continuar · Quitar»; «Continuar» suma `QueuePending` y `RetryCandidates` [app.js:renderProcessingBanner] [app.js:continueQueue] [app.js:transcribeConvention]
 - Los repetidos (`duplicate_id` o `repetido`) se excluyen salvo que se marque «Importar de todos modos». Los que tienen error nunca se importan.
 - Solo se aceptan archivos soltados `.pdf`, `.zip` o `.db`, y se ignoran si hay un diálogo abierto.

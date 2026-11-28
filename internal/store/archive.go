@@ -32,10 +32,21 @@ func (s *Store) SetArchived(ids []int64, archived bool) (int, error) {
 	if !archived {
 		q = "UPDATE convenios SET archivado_en=NULL, actualizado_en=datetime('now') WHERE archivado_en IS NOT NULL AND id IN (" + ph + ")"
 	}
-	res, err := s.db.Exec(q, uniq...)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return 0, err
 	}
+	defer tx.Rollback()
+	res, err := tx.Exec(q, uniq...)
+	if err != nil {
+		return 0, err
+	}
+	if archived {
+		// Un convenio archivado ya no es trabajo pendiente.
+		if _, err := tx.Exec("DELETE FROM cola_procesamiento WHERE convenio_id IN ("+ph+")", uniq...); err != nil {
+			return 0, err
+		}
+	}
 	n, _ := res.RowsAffected()
-	return int(n), nil
+	return int(n), tx.Commit()
 }

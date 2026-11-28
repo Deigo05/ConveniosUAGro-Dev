@@ -12,7 +12,12 @@ Importar más convenios de una vez y dejar el procesamiento con IA en pausa para
 
 ### Cambiado
 
-- **Los reintentos al abrir** ya no arrancan solos: los convenios que quedaron con error o con la transcripción incompleta se suman a la cola cuando pulsas «Continuar».
+- **Los reintentos al abrir** ya no arrancan solos: los convenios que quedaron con error o con la transcripción incompleta se suman a la cola cuando pulsas «Continuar». Un convenio que no se pudo procesar se queda en la cola, así no pierdes el pendiente de vista.
+
+### Corregido
+
+- La limpieza al abrir ya no borra de la cola un reanálisis pedido a mano, una transcripción a medias ni un convenio con error.
+- Al analizar un duplicado solo se copian los datos si el original de verdad los tenía; si solo había transcripción, el duplicado entra a la cola para extraer sus datos.
 
 ## [1.5.0] - 2026-11-26
 

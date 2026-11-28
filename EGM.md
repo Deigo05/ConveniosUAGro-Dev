@@ -144,7 +144,7 @@ Archivos de la raíz:
 **Cola de procesamiento**
 
 - `cola_procesamiento` guarda los convenios que esperan transcribirse y analizarse con IA; el orden es el de encolado. Se crea con `CREATE TABLE IF NOT EXISTS` y no sube `user_version`: una versión anterior la ignora. Quien procesa es la interfaz, no Go [schema.sql:cola_procesamiento] [queue.go:EnqueueForAI]
-- Al importar con la IA activa, la interfaz encola los archivos nuevos (`EnqueueAI`) y procesa de tres en tres; al terminar un archivo lo saca (`DequeueAI`). Un archivo que falla de verdad también sale de la cola y queda con su error visible [app.js:startAutoAI] [app.js:runAutoAIQueue]
+- Al importar con la IA activa, la interfaz encola los archivos nuevos (`EnqueueAI`) y procesa de tres en tres; al terminar un archivo lo saca (`DequeueAI`). Un archivo que falla de verdad se queda en la cola con su error: «Continuar» lo reintenta otro día y «Quitar» lo descarta. `EnqueueAI(ids, reanalisis)` marca el análisis pedido a mano sobre convenios ya analizados, que la limpieza al arrancar conserva [app.js:startAutoAI] [app.js:runAutoAIQueue]
 - Al abrir no se procesa nada solo: `GetBootstrap` informa `cola_pendientes`, `startup` limpia las filas ya resueltas (`PruneQueue`) y el aviso ofrece «Continuar» y «Quitar». «Continuar» suma la cola y los candidatos de reintento (`RetryCandidates`) y arranca [app.go:startup] [app.js:continueQueue]
 - «Pausar» actúa en el siguiente límite de página o de archivo: la página en curso termina y se guarda, no se llama a `FailTranscription` ni se suman rondas de reintento, y el archivo vuelve al frente de la cola. Lo ya transcrito se retoma con `ResumeTranscription` [app.js:renderProcessingBanner] [app.js:transcribeConvention]
 - Cada tanda de la cola lleva número (`autoRunSeq`): si «Continuar» arranca una mientras la anterior cierra, la anterior no apaga el indicador de la nueva [app.js:runAutoAIQueue]
@@ -161,7 +161,7 @@ Archivos de la raíz:
 - **Arranque, en orden:**
   - `store.Open` carga las etiquetas base, pasa a `pendiente` las transcripciones `en_proceso` y marca como error los análisis `pendiente` («Análisis interrumpido»).
   - `startup`, con `tagMu`, aplica las sugerencias pendientes, asigna el estado de las ciudades, unifica los nombres de municipio y repara las etiquetas de facultad. Corre una sola vez en la vida de la base, protegida por una bandera, la reparación de etiquetas obligatorias, y marca «Convenio Abierto» donde falta.
-  - En segundo plano: el recálculo de duplicados y la limpieza del `.old` (hasta 10 intentos cada 2 s). `startup` también limpia la cola de procesamiento de los convenios ya resueltos.
+  - En segundo plano: el recálculo de duplicados y la limpieza del `.old` (hasta 10 intentos cada 2 s). `startup` limpia al principio la cola de procesamiento: quita archivados, huérfanos y convenios ya resueltos sin transcripción pendiente, y conserva reanálisis, transcripciones a medias y errores.
   - `ImportConvenios` repite, con `tagMu`, la unificación de municipios, la reparación de facultades y «Convenio Abierto».
 
   [internal/store/store.go:Open] [app.go:(*App).startup] [app.go:(*App).ImportConvenios]

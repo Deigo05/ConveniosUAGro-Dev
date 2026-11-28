@@ -5,16 +5,22 @@ package store
 // viaja en los paquetes exportados.
 
 // EnqueueForAI agrega convenios al final de la cola. Un convenio que ya está
-// en la cola no se duplica.
-func (s *Store) EnqueueForAI(ids []int64) error {
+// en la cola no se duplica; reanalisis marca el trabajo pedido a mano sobre un
+// convenio ya analizado, que la limpieza al arrancar no debe borrar.
+func (s *Store) EnqueueForAI(ids []int64, reanalisis bool) error {
+	v := 0
+	if reanalisis {
+		v = 1
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	for _, id := range ids {
-		if _, err := tx.Exec(`INSERT OR IGNORE INTO cola_procesamiento (convenio_id)
-			SELECT id FROM convenios WHERE id=?`, id); err != nil {
+		if _, err := tx.Exec(`INSERT INTO cola_procesamiento (convenio_id, reanalisis)
+			SELECT id, ? FROM convenios WHERE id=?
+			ON CONFLICT(convenio_id) DO UPDATE SET reanalisis=max(reanalisis, excluded.reanalisis)`, v, id); err != nil {
 			return err
 		}
 	}
@@ -53,11 +59,16 @@ func (s *Store) QueueCount() (int, error) {
 }
 
 // PruneQueue quita de la cola los convenios que ya se resolvieron (analizados
-// antes de que la aplicación se cerrara) y los archivados. Los que quedaron
-// con error se conservan: el usuario decide si los reintenta.
+// antes de que la aplicación se cerrara) y los archivados, además de las filas
+// huérfanas. No borra un reanálisis pedido a mano, una transcripción a medias
+// ni un convenio con error: eso es trabajo que el usuario quiere terminar.
 func (s *Store) PruneQueue() error {
-	_, err := s.db.Exec(`DELETE FROM cola_procesamiento WHERE convenio_id IN (
-		SELECT id FROM convenios WHERE ia_estado IN ('ok','parcial') OR archivado_en IS NOT NULL)`)
+	_, err := s.db.Exec(`DELETE FROM cola_procesamiento WHERE
+		convenio_id NOT IN (SELECT id FROM convenios)
+		OR convenio_id IN (SELECT id FROM convenios WHERE archivado_en IS NOT NULL)
+		OR (reanalisis=0 AND convenio_id IN (
+			SELECT id FROM convenios
+			WHERE ia_estado IN ('ok','parcial') AND transcripcion_estado NOT IN ('pendiente','en_proceso')))`)
 	return err
 }
 

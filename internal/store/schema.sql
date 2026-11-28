@@ -135,5 +135,8 @@ CREATE TABLE IF NOT EXISTS revision_fechas_hechas (
 CREATE TABLE IF NOT EXISTS cola_procesamiento (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   convenio_id INTEGER NOT NULL UNIQUE REFERENCES convenios(id) ON DELETE CASCADE,
+  -- 1: el usuario pidió analizarlo de nuevo aunque ya estaba analizado. La
+  -- limpieza al arrancar conserva estas filas: es trabajo pedido a mano.
+  reanalisis  INTEGER NOT NULL DEFAULT 0,
   creado_en   TEXT NOT NULL DEFAULT (datetime('now'))
 );

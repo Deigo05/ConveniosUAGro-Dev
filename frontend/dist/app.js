@@ -1447,14 +1447,14 @@ async function transcribeCurrent() {
   }
 }
 
-function startAutoAI(ids) {
+function startAutoAI(ids, reanalisis = false) {
   if (!ids || !ids.length || !state.config.ai_enabled || !state.config.has_api_key) return;
   const nuevos = [...new Set(ids)].filter(id => id && !state.autoQueue.includes(id) && !state.autoActive.has(id));
   if (nuevos.length) {
     state.autoQueue.push(...nuevos);
     state.colaPendientes = Math.max(state.colaPendientes, state.autoQueue.length + state.autoActive.size);
     // La cola se guarda en la base: si la app se cierra, los pendientes siguen.
-    call('EnqueueAI', nuevos).catch(err => console.error(err));
+    call('EnqueueAI', nuevos, Boolean(reanalisis)).catch(err => console.error(err));
   }
   // Sin nada nuevo pero con trabajo de una tanda anterior que quedó detenido
   // (por ejemplo, la pausa), también se arranca.
@@ -1550,8 +1550,7 @@ async function runAutoAIQueue() {
         } else {
           console.error(err);
           failed++;
-          showToast('La IA no pudo completar un archivo: ' + errorText(err), 'error');
-          call('DequeueAI', id).catch(() => {});
+          showToast('La IA no pudo completar un archivo: ' + errorText(err) + ' Queda en la cola para reintentarlo.', 'error');
         }
       } finally {
         state.autoActive.delete(id);
@@ -2607,7 +2606,7 @@ async function analyzeWithAI(ids) {
     const ok = await confirmDialog('Volver a analizar', `${intro} Al analizar de nuevo, los datos capturados (dependencia, firmantes, fechas y notas) se reemplazan con lo que lea la IA. Las etiquetas que pusiste a mano se conservan.`, 'Analizar de nuevo', false);
     if (!ok) return;
   }
-  startAutoAI(ids);
+  startAutoAI(ids, true);
   showToast(ids.length === 1 ? 'Análisis con IA iniciado.' : `Análisis con IA iniciado para ${ids.length} convenios.`, 'info');
   if (state.view === 'convenios') renderList();
 }

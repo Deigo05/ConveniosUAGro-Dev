@@ -139,6 +139,12 @@ func loadConfig(path string) (config.Config, string) {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// La cola de procesamiento pierde los convenios que ya se resolvieron; se
+	// hace antes que las reparaciones para que el contador del arranque sea el
+	// bueno.
+	if err := a.store.PruneQueue(); err != nil {
+		log.Printf("no se pudo limpiar la cola de procesamiento: %v", err)
+	}
 	// Las reparaciones cambian etiquetas: se hacen con tagMu, como el resto.
 	a.tagMu.Lock()
 	a.applyPendingSuggestions()
@@ -150,10 +156,6 @@ func (a *App) startup(ctx context.Context) {
 	a.repairRequiredTags()
 	a.markOpenAgreements()
 	a.tagMu.Unlock()
-	// La cola de procesamiento pierde los convenios que ya se resolvieron.
-	if err := a.store.PruneQueue(); err != nil {
-		log.Printf("no se pudo limpiar la cola de procesamiento: %v", err)
-	}
 	// La primera vez calcula la huella de todos los textos; luego es inmediato.
 	go func() {
 		a.refreshDuplicates()
@@ -185,14 +187,19 @@ func (a *App) refreshDuplicates() {
 	}
 }
 
-// QueuePending devuelve los convenios en cola, en orden.
+// QueuePending devuelve los convenios en cola, en orden, después de quitar los
+// que ya no son trabajo pendiente.
 func (a *App) QueuePending() ([]int64, error) {
+	if err := a.store.PruneQueue(); err != nil {
+		log.Printf("no se pudo limpiar la cola de procesamiento: %v", err)
+	}
 	return a.store.QueuedIDs()
 }
 
-// EnqueueAI pone convenios en la cola de procesamiento con IA.
-func (a *App) EnqueueAI(ids []int64) error {
-	return a.store.EnqueueForAI(ids)
+// EnqueueAI pone convenios en la cola de procesamiento con IA. reanalisis
+// indica que es un análisis pedido a mano sobre convenios ya analizados.
+func (a *App) EnqueueAI(ids []int64, reanalisis bool) error {
+	return a.store.EnqueueForAI(ids, reanalisis)
 }
 
 // DequeueAI saca un convenio de la cola.
@@ -285,9 +292,12 @@ func (a *App) GetBootstrap() (Bootstrap, error) {
 	aviso := a.startupNotice
 	a.startupNotice = ""
 	a.cfgMu.Unlock()
+	// El contador de la cola no debe tumbar el arranque: si falla, se sigue
+	// con cero y queda en el registro.
 	cola, err := a.store.QueueCount()
 	if err != nil {
-		return Bootstrap{}, err
+		log.Printf("no se pudo contar la cola de procesamiento: %v", err)
+		cola = 0
 	}
 	return Bootstrap{Tags: tags, Stats: stats, App: a.appInfo(), Config: a.configView(), Aviso: aviso, ColaPendientes: cola}, nil
 }
@@ -361,6 +371,9 @@ func (a *App) ChoosePDFs() ([]string, error) {
 // ImportPDFs copia y registra los PDF seleccionados. El análisis con IA lo
 // lanza después la interfaz, con la cola automática.
 func (a *App) ImportPDFs(paths []string) []ImportResult {
+	if len(paths) == 0 {
+		return []ImportResult{}
+	}
 	if len(paths) > 200 {
 		paths = paths[:200]
 	}
@@ -720,6 +733,9 @@ func (a *App) extract(id int64, nota string, keepDoubts bool) (store.ConventionD
 	}
 	if err := a.applyAITags(id, len(sugs) > 0, prevFacultad, res.Facultad, res.FacultadCiudad); err != nil {
 		return store.ConventionDetail{}, err
+	}
+	if err := a.store.Dequeue(id); err != nil {
+		log.Printf("no se pudo sacar el convenio %d de la cola: %v", id, err)
 	}
 	a.refreshDuplicates()
 	if res.Renovacion {
