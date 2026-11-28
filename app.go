@@ -78,6 +78,8 @@ type Bootstrap struct {
 	// Aviso es un mensaje del arranque para el usuario (por ejemplo, que los
 	// ajustes estaban dañados). Se entrega una sola vez.
 	Aviso string `json:"aviso,omitempty"`
+	// ColaPendientes es cuántos convenios esperan procesarse con IA.
+	ColaPendientes int `json:"cola_pendientes"`
 }
 
 // ImportResult informa el resultado de cada archivo importado.
@@ -148,6 +150,10 @@ func (a *App) startup(ctx context.Context) {
 	a.repairRequiredTags()
 	a.markOpenAgreements()
 	a.tagMu.Unlock()
+	// La cola de procesamiento pierde los convenios que ya se resolvieron.
+	if err := a.store.PruneQueue(); err != nil {
+		log.Printf("no se pudo limpiar la cola de procesamiento: %v", err)
+	}
 	// La primera vez calcula la huella de todos los textos; luego es inmediato.
 	go func() {
 		a.refreshDuplicates()
@@ -177,6 +183,26 @@ func (a *App) refreshDuplicates() {
 	if err := a.store.RefreshDateChecks(); err != nil {
 		log.Printf("no se pudieron comprobar las fechas: %v", err)
 	}
+}
+
+// QueuePending devuelve los convenios en cola, en orden.
+func (a *App) QueuePending() ([]int64, error) {
+	return a.store.QueuedIDs()
+}
+
+// EnqueueAI pone convenios en la cola de procesamiento con IA.
+func (a *App) EnqueueAI(ids []int64) error {
+	return a.store.EnqueueForAI(ids)
+}
+
+// DequeueAI saca un convenio de la cola.
+func (a *App) DequeueAI(id int64) error {
+	return a.store.Dequeue(id)
+}
+
+// ClearQueue vacía la cola sin tocar los convenios.
+func (a *App) ClearQueue() error {
+	return a.store.ClearQueue()
 }
 
 // ConfirmDate registra que el usuario revisó la fecha ("firma" o "vigencia")
@@ -259,7 +285,11 @@ func (a *App) GetBootstrap() (Bootstrap, error) {
 	aviso := a.startupNotice
 	a.startupNotice = ""
 	a.cfgMu.Unlock()
-	return Bootstrap{Tags: tags, Stats: stats, App: a.appInfo(), Config: a.configView(), Aviso: aviso}, nil
+	cola, err := a.store.QueueCount()
+	if err != nil {
+		return Bootstrap{}, err
+	}
+	return Bootstrap{Tags: tags, Stats: stats, App: a.appInfo(), Config: a.configView(), Aviso: aviso, ColaPendientes: cola}, nil
 }
 
 // ListConvenios devuelve la página filtrada.
@@ -331,8 +361,8 @@ func (a *App) ChoosePDFs() ([]string, error) {
 // ImportPDFs copia y registra los PDF seleccionados. El análisis con IA lo
 // lanza después la interfaz, con la cola automática.
 func (a *App) ImportPDFs(paths []string) []ImportResult {
-	if len(paths) > 60 {
-		paths = paths[:60]
+	if len(paths) > 200 {
+		paths = paths[:200]
 	}
 	results := make([]ImportResult, 0, len(paths))
 	for _, path := range paths {

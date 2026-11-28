@@ -110,8 +110,13 @@
         </div>
 
         <div class="banner banner--info" id="processing-banner" hidden>
-          <span class="spinner"></span>
+          <span class="spinner" id="processing-spinner"></span>
           <span id="processing-text">Procesando convenios con IA…</span>
+          <span class="banner__buttons">
+            <button class="btn btn--outline btn--small" id="processing-pause" hidden>Pausar</button>
+            <button class="btn btn--primary btn--small" id="processing-resume" hidden>Continuar</button>
+            <button class="btn btn--text btn--small" id="processing-clear" hidden>Quitar</button>
+          </span>
         </div>
 
         <section class="panel panel--list">

@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -566,5 +568,70 @@ func TestExtractNoLinksRenewalWithDateToConfirm(t *testing.T) {
 	}
 	if res, err = a.ConfirmDate(id, "firma"); err != nil || len(res.RevisionFechas) != 0 {
 		t.Fatalf("confirmar debe quitar la marca: %+v %v", res.RevisionFechas, err)
+	}
+}
+
+// La cola de procesamiento se guarda, se informa en el arranque y se limpia
+// sola de los convenios que ya se resolvieron.
+func TestQueueBootstrapAndPrune(t *testing.T) {
+	t.Setenv("CONVENIOS_DATA_DIR", t.TempDir())
+	paths, err := store.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a := &App{store: st, paths: paths, cfg: config.Default()}
+	id, err := st.Insert(pdfutil.SavedFile{NombreGuardado: "55555555555555555555555555555555.pdf", NombreOriginal: "q.pdf", SHA256: "queue-1", Paginas: 1, Texto: "texto"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.EnqueueAI([]int64{id}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := a.GetBootstrap()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.ColaPendientes != 1 {
+		t.Fatalf("cola_pendientes = %d", b.ColaPendientes)
+	}
+	if got, _ := a.QueuePending(); len(got) != 1 || got[0] != id {
+		t.Fatalf("QueuePending = %v", got)
+	}
+	if err := st.SetAIResult(id, store.ConventionInput{ID: id, Dependencia: "X"}, "ok", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PruneQueue(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := a.QueuePending(); len(got) != 0 {
+		t.Fatalf("un convenio resuelto sigue en cola: %v", got)
+	}
+}
+
+// ImportPDFs acepta hasta 200 rutas por vez (antes 60).
+func TestImportPDFsCap200(t *testing.T) {
+	t.Setenv("CONVENIOS_DATA_DIR", t.TempDir())
+	paths, err := store.DefaultPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	a := &App{store: st, paths: paths, cfg: config.Default()}
+	rutas := make([]string, 201)
+	for i := range rutas {
+		rutas[i] = filepath.Join(t.TempDir(), fmt.Sprintf("no-existe-%d.pdf", i))
+	}
+	res := a.ImportPDFs(rutas)
+	if len(res) != 200 {
+		t.Fatalf("ImportPDFs procesó %d rutas; esperaba 200", len(res))
 	}
 }
