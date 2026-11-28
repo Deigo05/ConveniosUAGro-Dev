@@ -127,3 +127,16 @@ CREATE TABLE IF NOT EXISTS revision_fechas_hechas (
   convenio_id INTEGER PRIMARY KEY REFERENCES convenios(id) ON DELETE CASCADE,
   clave       TEXT NOT NULL
 );
+
+-- Convenios en cola para procesar con IA (transcribir y extraer). La fila se
+-- borra al terminar el convenio o al quitarlo de la cola; si la app se cierra,
+-- la fila sigue y la interfaz ofrece continuar. No sube el esquema: una
+-- versión anterior la ignora.
+CREATE TABLE IF NOT EXISTS cola_procesamiento (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  convenio_id INTEGER NOT NULL UNIQUE REFERENCES convenios(id) ON DELETE CASCADE,
+  -- 1: el usuario pidió analizarlo de nuevo aunque ya estaba analizado. La
+  -- limpieza al arrancar conserva estas filas: es trabajo pedido a mano.
+  reanalisis  INTEGER NOT NULL DEFAULT 0,
+  creado_en   TEXT NOT NULL DEFAULT (datetime('now'))
+);

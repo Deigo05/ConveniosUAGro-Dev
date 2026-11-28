@@ -30,7 +30,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-const appVersion = "1.5.0"
+const appVersion = "1.6.0"
 
 // buildCommit y buildDate se fijan al compilar en GitHub Actions con
 // -ldflags "-X main.buildCommit=<sha> -X main.buildDate=<RFC3339>". En una
@@ -78,6 +78,8 @@ type Bootstrap struct {
 	// Aviso es un mensaje del arranque para el usuario (por ejemplo, que los
 	// ajustes estaban dañados). Se entrega una sola vez.
 	Aviso string `json:"aviso,omitempty"`
+	// ColaPendientes es cuántos convenios esperan procesarse con IA.
+	ColaPendientes int `json:"cola_pendientes"`
 }
 
 // ImportResult informa el resultado de cada archivo importado.
@@ -137,6 +139,12 @@ func loadConfig(path string) (config.Config, string) {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// La cola de procesamiento pierde los convenios que ya se resolvieron; se
+	// hace antes que las reparaciones para que el contador del arranque sea el
+	// bueno.
+	if err := a.store.PruneQueue(); err != nil {
+		log.Printf("no se pudo limpiar la cola de procesamiento: %v", err)
+	}
 	// Las reparaciones cambian etiquetas: se hacen con tagMu, como el resto.
 	a.tagMu.Lock()
 	a.applyPendingSuggestions()
@@ -177,6 +185,37 @@ func (a *App) refreshDuplicates() {
 	if err := a.store.RefreshDateChecks(); err != nil {
 		log.Printf("no se pudieron comprobar las fechas: %v", err)
 	}
+}
+
+// QueuePending devuelve los convenios en cola, en orden, después de quitar los
+// que ya no son trabajo pendiente.
+func (a *App) QueuePending() ([]int64, error) {
+	if err := a.store.PruneQueue(); err != nil {
+		log.Printf("no se pudo limpiar la cola de procesamiento: %v", err)
+	}
+	return a.store.QueuedIDs()
+}
+
+// EnqueueAI pone convenios en la cola de procesamiento con IA. reanalisis
+// indica que es un análisis pedido a mano sobre convenios ya analizados.
+func (a *App) EnqueueAI(ids []int64, reanalisis bool) error {
+	return a.store.EnqueueForAI(ids, reanalisis)
+}
+
+// DequeueAI saca un convenio de la cola.
+func (a *App) DequeueAI(id int64) error {
+	return a.store.Dequeue(id)
+}
+
+// PauseTranscription deja la transcripción en «pendiente» sin borrar lo ya
+// transcrito, para que la cola la retome después.
+func (a *App) PauseTranscription(id int64) error {
+	return a.store.SuspendTranscription(id)
+}
+
+// ClearQueue vacía la cola sin tocar los convenios.
+func (a *App) ClearQueue() error {
+	return a.store.ClearQueue()
 }
 
 // ConfirmDate registra que el usuario revisó la fecha ("firma" o "vigencia")
@@ -259,7 +298,14 @@ func (a *App) GetBootstrap() (Bootstrap, error) {
 	aviso := a.startupNotice
 	a.startupNotice = ""
 	a.cfgMu.Unlock()
-	return Bootstrap{Tags: tags, Stats: stats, App: a.appInfo(), Config: a.configView(), Aviso: aviso}, nil
+	// El contador de la cola no debe tumbar el arranque: si falla, se sigue
+	// con cero y queda en el registro.
+	cola, err := a.store.QueueCount()
+	if err != nil {
+		log.Printf("no se pudo contar la cola de procesamiento: %v", err)
+		cola = 0
+	}
+	return Bootstrap{Tags: tags, Stats: stats, App: a.appInfo(), Config: a.configView(), Aviso: aviso, ColaPendientes: cola}, nil
 }
 
 // ListConvenios devuelve la página filtrada.
@@ -331,8 +377,11 @@ func (a *App) ChoosePDFs() ([]string, error) {
 // ImportPDFs copia y registra los PDF seleccionados. El análisis con IA lo
 // lanza después la interfaz, con la cola automática.
 func (a *App) ImportPDFs(paths []string) []ImportResult {
-	if len(paths) > 60 {
-		paths = paths[:60]
+	if len(paths) == 0 {
+		return []ImportResult{}
+	}
+	if len(paths) > 200 {
+		paths = paths[:200]
 	}
 	results := make([]ImportResult, 0, len(paths))
 	for _, path := range paths {
@@ -690,6 +739,9 @@ func (a *App) extract(id int64, nota string, keepDoubts bool) (store.ConventionD
 	}
 	if err := a.applyAITags(id, len(sugs) > 0, prevFacultad, res.Facultad, res.FacultadCiudad); err != nil {
 		return store.ConventionDetail{}, err
+	}
+	if err := a.store.Dequeue(id); err != nil {
+		log.Printf("no se pudo sacar el convenio %d de la cola: %v", id, err)
 	}
 	a.refreshDuplicates()
 	if res.Renovacion {

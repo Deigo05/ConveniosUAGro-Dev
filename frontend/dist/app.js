@@ -27,6 +27,10 @@ const state = {
   activity: new Map(),
   autoQueue: [],
   autoRunning: false,
+  autoBusy: false,
+  autoRunSeq: 0,
+  autoPaused: false,
+  colaPendientes: 0,
   autoTotal: 0,
   autoDone: 0,
   confirmResolve: null,
@@ -86,7 +90,7 @@ async function init() {
     if (b.aviso) showToast(b.aviso, 'error');
     await loadList();
     setupRuntime();
-    retryFailedOnStart();
+    renderProcessingBanner();
     if (state.config.update_check !== false) {
       setTimeout(() => checkForUpdates(false), 4000);
       setInterval(() => checkForUpdates(false), UPDATE_INTERVAL_MS);
@@ -144,6 +148,9 @@ function bindEvents() {
   $('#btn-pending').addEventListener('click', togglePending);
   $('#btn-noconv').addEventListener('click', toggleNoConvenios);
   $('#btn-fechas').addEventListener('click', toggleFechasPorConfirmar);
+  $('#processing-pause').addEventListener('click', () => { state.autoPaused = true; renderProcessingBanner(); });
+  $('#processing-resume').addEventListener('click', continueQueue);
+  $('#processing-clear').addEventListener('click', clearQueueConfirm);
   $('#date-reviews').addEventListener('click', onDateReviewClick);
   $('#btn-mark-noconv').addEventListener('click', () => setNoConvenio(true));
   $('#btn-clear-filters').addEventListener('click', clearFilters);
@@ -270,6 +277,7 @@ function applyBootstrap(b) {
   state.stats = b.stats || {};
   state.config = b.config || {};
   state.app = b.app || {};
+  state.colaPendientes = Number(b.cola_pendientes || 0);
   renderStats();
   renderTagFilter();
   renderNav();
@@ -395,19 +403,55 @@ function renderProcessingBanner() {
   const banner = $('#processing-banner');
   if (!banner) return;
   const items = processingItems();
-  const active = items.length > 0 || state.autoRunning;
+  const canRun = Boolean(state.config && state.config.ai_enabled && state.config.has_api_key);
+  const enMemoria = state.autoQueue.length + state.autoActive.size;
+  const enCola = Math.max(state.colaPendientes || 0, state.autoRunning || state.autoPaused ? enMemoria : 0);
+  // Un convenio con transcripción pendiente que nadie encoló no es «está
+  // procesando»: se avisa solo de lo que de verdad está en curso.
+  const enCurso = items.filter(c => c.transcripcion_estado === 'en_proceso' || c.ia_estado === 'pendiente');
+  const active = state.autoRunning || (canRun && enCola > 0) || enCurso.length > 0;
   banner.hidden = !active;
-  if (!active) return;
-  const transcripcion = items.filter(c => c.transcripcion_estado === 'en_proceso').length;
-  const analisis = items.filter(c => c.ia_estado === 'pendiente').length;
-  const enCola = items.filter(c => c.transcripcion_estado === 'pendiente' && Number(c.paginas_por_transcribir || 0) > 0).length;
-  const partes = [];
-  if (transcripcion) partes.push(`${transcripcion} en transcripción`);
-  if (analisis) partes.push(`${analisis} en análisis`);
-  if (enCola) partes.push(`${enCola} en cola`);
-  if (!partes.length) partes.push('preparando el procesamiento');
-  const n = Math.max(items.length, state.autoRunning ? state.autoTotal - state.autoDone : 0, 1);
-  $('#processing-text').textContent = `Procesando ${n} convenio${n === 1 ? '' : 's'} con IA (${partes.join(' y ')}). Puedes seguir usando el buscador; los datos se actualizarán solos.`;
+  const pause = $('#processing-pause');
+  const resume = $('#processing-resume');
+  const clear = $('#processing-clear');
+  const spinner = $('#processing-spinner');
+  if (!active) {
+    pause.hidden = resume.hidden = clear.hidden = true;
+    return;
+  }
+  const text = $('#processing-text');
+  if (state.autoRunning) {
+    const transcripcion = items.filter(c => c.transcripcion_estado === 'en_proceso').length;
+    const analisis = items.filter(c => c.ia_estado === 'pendiente').length;
+    const enFila = items.filter(c => c.transcripcion_estado === 'pendiente' && Number(c.paginas_por_transcribir || 0) > 0).length;
+    const partes = [];
+    if (transcripcion) partes.push(`${transcripcion} en transcripción`);
+    if (analisis) partes.push(`${analisis} en análisis`);
+    if (enFila) partes.push(`${enFila} en cola`);
+    if (!partes.length) partes.push('preparando el procesamiento');
+    const n = Math.max(items.length, enCola, 1);
+    text.textContent = `Procesando ${n} convenio${n === 1 ? '' : 's'} con IA (${partes.join(' y ')}). Puedes seguir usando el buscador; los datos se actualizarán solos.`;
+    pause.hidden = false;
+    resume.hidden = clear.hidden = true;
+    spinner.hidden = false;
+    return;
+  }
+  if (enCola > 0) {
+    text.textContent = state.autoPaused
+      ? `En pausa: ${enCola} convenio${enCola === 1 ? '' : 's'} en cola. Lo ya transcrito y analizado se conserva.`
+      : `${enCola} convenio${enCola === 1 ? '' : 's'} en cola para procesar con IA.${canRun ? ' Pulsa «Continuar» cuando quieras.' : ' Activa la IA en Ajustes para continuar.'}`;
+    pause.hidden = true;
+    resume.hidden = !canRun;
+    clear.hidden = false;
+    spinner.hidden = true;
+    return;
+  }
+  // Procesamiento en curso que no pasa por esta cola (por ejemplo, abierto en
+  // la ficha y transcribiendo a mano).
+  const n = Math.max(enCurso.length, 1);
+  text.textContent = `Procesando ${n} convenio${n === 1 ? '' : 's'} con IA. Puedes seguir usando el buscador; los datos se actualizarán solos.`;
+  pause.hidden = resume.hidden = clear.hidden = true;
+  spinner.hidden = false;
 }
 
 function syncProcessingPoll() {
@@ -1404,24 +1448,115 @@ async function transcribeCurrent() {
   }
 }
 
-function startAutoAI(ids) {
+async function startAutoAI(ids, reanalisis = false) {
   if (!ids || !ids.length || !state.config.ai_enabled || !state.config.has_api_key) return;
   const nuevos = [...new Set(ids)].filter(id => id && !state.autoQueue.includes(id) && !state.autoActive.has(id));
-  if (!nuevos.length) return;
-  state.autoQueue.push(...nuevos);
+  if (nuevos.length) {
+    state.autoQueue.push(...nuevos);
+    state.colaPendientes = Math.max(state.colaPendientes, state.autoQueue.length + state.autoActive.size);
+    // La cola se guarda en la base: si la app se cierra, los pendientes siguen.
+    try {
+      await call('EnqueueAI', nuevos, Boolean(reanalisis));
+    } catch (err) {
+      console.error(err);
+      showToast('No se pudo guardar la cola: ' + errorText(err), 'error');
+    }
+  }
+  // Sin nada nuevo pero con trabajo de una tanda anterior que quedó detenido
+  // (por ejemplo, la pausa), también se arranca.
+  if (!state.autoQueue.length && !state.autoActive.size) return;
   if (state.autoRunning) {
-    state.autoTotal += nuevos.length;
-    renderAIActivity();
-  } else {
+    if (nuevos.length) {
+      state.autoTotal += nuevos.length;
+      renderAIActivity();
+    }
+  } else if (!state.autoPaused) {
     runAutoAIQueue();
   }
   renderProcessingBanner();
   syncProcessingPoll();
 }
 
+// pausadoError distingue la pausa de un fallo: no se reintenta ni se marca la
+// transcripción como fallida.
+function pausadoError() {
+  const e = new Error('pausado');
+  e.paused = true;
+  return e;
+}
+
+// continueQueue procesa lo que quedó en la cola y los convenios con error.
+async function continueQueue() {
+  if (state.autoBusy) return;
+  state.autoBusy = true;
+  const resume = $('#processing-resume');
+  if (resume) resume.disabled = true;
+  try {
+    await continueQueueNow();
+  } finally {
+    state.autoBusy = false;
+    if (resume) resume.disabled = false;
+  }
+}
+
+async function continueQueueNow() {
+  if (!state.config.ai_enabled || !state.config.has_api_key) {
+    const ok = await confirmDialog('La IA no está configurada', 'Para procesar la cola, activa la IA y guarda la clave del servicio en Ajustes.', 'Ir a Ajustes', false);
+    if (ok) navigate('ajustes');
+    return;
+  }
+  state.autoPaused = false;
+  let pendientes;
+  try {
+    pendientes = await call('QueuePending') || [];
+  } catch (err) {
+    console.error(err);
+    showToast('No se pudo leer la cola: ' + errorText(err), 'error');
+    return;
+  }
+  let reintentos = [];
+  try { reintentos = await call('RetryCandidates') || []; } catch (err) { console.error(err); }
+  // La base manda: lo que ya no está en la cola no se procesa, y lo que está
+  // en memoria desde antes se conserva.
+  const enMemoria = state.autoQueue.filter(id => !state.autoActive.has(id));
+  const todos = [...new Set([...pendientes, ...reintentos, ...enMemoria])];
+  state.autoQueue = [];
+  state.colaPendientes = pendientes.length + reintentos.length;
+  if (!todos.length) {
+    renderProcessingBanner();
+    showToast('No hay convenios pendientes en la cola.', 'info');
+    return;
+  }
+  await startAutoAI(todos);
+}
+
+// clearQueueConfirm vacía la cola sin tocar los convenios ni sus datos.
+async function clearQueueConfirm() {
+  const n = state.colaPendientes || 0;
+  const ok = await confirmDialog('Quitar de la cola',
+    `Se quitarán ${n} convenio${n === 1 ? '' : 's'} de la cola. No se borra ningún archivo ni dato: solo dejan de procesarse hasta que los vuelvas a poner. ¿Continuar?`,
+    'Quitar de la cola', false);
+  if (!ok) return;
+  try {
+    await call('ClearQueue');
+    state.autoQueue = [];
+    state.colaPendientes = 0;
+    state.autoPaused = false;
+    await loadList({ preserveSelection: true });
+    renderProcessingBanner();
+    showToast('Cola vacía.', 'info');
+  } catch (err) {
+    showToast(errorText(err), 'error');
+  }
+}
+
 // runAutoAIQueue procesa la cola con varios archivos a la vez. Mientras uno
 // espera al servicio de IA, los demás avanzan.
 async function runAutoAIQueue() {
+  if (state.autoRunning) return;
+  // Cada tanda lleva número: si «Continuar» arranca otra mientras la anterior
+  // cierra, la anterior no debe apagar el indicador de la nueva.
+  const runId = ++state.autoRunSeq;
   state.autoRunning = true;
   state.autoTotal = state.autoQueue.length;
   state.autoDone = 0;
@@ -1430,19 +1565,30 @@ async function runAutoAIQueue() {
   renderProcessingBanner();
   syncProcessingPoll();
   const worker = async () => {
-    while (state.autoQueue.length) {
+    while (!state.autoPaused && state.autoQueue.length) {
       const id = state.autoQueue.shift();
       state.autoActive.add(id);
+      let pausado = false;
       try {
         await processAutoFile(id);
+        await call('DequeueAI', id).catch(() => {});
       } catch (err) {
-        console.error(err);
-        failed++;
-        showToast('La IA no pudo completar un archivo: ' + errorText(err), 'error');
+        if (err && err.paused) {
+          // Vuelve al frente de la cola y se retoma al continuar.
+          pausado = true;
+          state.autoQueue.unshift(id);
+          state.autoPaused = true;
+        } else {
+          console.error(err);
+          failed++;
+          showToast('La IA no pudo completar un archivo: ' + errorText(err), 'error');
+          await call('DequeueAI', id).catch(() => {});
+        }
       } finally {
         state.autoActive.delete(id);
-        state.autoDone++;
+        if (!pausado) state.autoDone++;
         renderAIActivity();
+        renderProcessingBanner();
       }
     }
   };
@@ -1450,18 +1596,20 @@ async function runAutoAIQueue() {
   try {
     await Promise.all(Array.from({ length: AUTO_FILES_AT_ONCE }, worker));
   } finally {
-    state.autoRunning = false;
     renderAIActivity();
     await refreshData();
     await loadList({ preserveSelection: true });
+    if (state.autoRunSeq !== runId) return;
+    state.autoRunning = false;
+    if (!state.autoQueue.length && !state.autoActive.size) state.autoPaused = false;
     renderProcessingBanner();
     syncProcessingPoll();
-    if (total > 1 && failed < total) {
+    if (total > 1 && failed < total && !state.autoPaused) {
       const ok = total - failed;
       showToast(`Listo: ${ok} archivo${ok === 1 ? '' : 's'} procesado${ok === 1 ? '' : 's'} con IA.`, 'success');
     }
     // Archivos agregados mientras se cerraba la cola.
-    if (state.autoQueue.length && !state.autoRunning) runAutoAIQueue();
+    if (state.autoQueue.length && !state.autoRunning && !state.autoPaused) runAutoAIQueue();
   }
 }
 
@@ -1507,6 +1655,8 @@ async function withRetries(fn, delays, onRetry) {
     try {
       return await fn(attempt);
     } catch (err) {
+      if (err && err.paused) throw err;
+      if (state.autoPaused) throw pausadoError();
       if (attempt >= delays.length || !await isRetryable(err)) throw err;
       if (onRetry) onRetry(attempt + 1, err);
       await sleep(delays[attempt]);
@@ -1514,20 +1664,9 @@ async function withRetries(fn, delays, onRetry) {
   }
 }
 
-// Al abrir la aplicación se reintentan los convenios que quedaron con «IA con
-// error» o con la transcripción incompleta. Go limita a 3 aperturas seguidas
-// por convenio para no gastar sin fin en uno que siempre falla.
-async function retryFailedOnStart() {
-  if (!state.config.ai_enabled || !state.config.has_api_key) return;
-  try {
-    const ids = await call('RetryCandidates');
-    if (!ids || !ids.length) return;
-    showToast(`Reintentando ${ids.length} convenio${ids.length === 1 ? '' : 's'} con error de IA o transcripción incompleta.`, 'info');
-    startAutoAI(ids);
-  } catch (err) {
-    console.error(err);
-  }
-}
+// Los convenios con error o con la transcripción incompleta ya no se
+// reintentan solos al abrir: se suman a la cola cuando el usuario pulsa
+// «Continuar» (continueQueue), para no gastar IA sin preguntar.
 
 // Las páginas escaneadas de todos los documentos comparten un mismo cupo de
 // envíos simultáneos.
@@ -1559,7 +1698,7 @@ async function processAutoFile(id) {
 
 async function processAutoFileOnce(id) {
   let c = await call('GetConvenio', id);
-  if (!state.config.ai_enabled) return;
+  if (!state.config.ai_enabled) throw pausadoError();
   // Una transcripción completa no se repite (antes se repetía si el PDF
   // tenía páginas escaneadas, y un reintento la volvía a pagar entera).
   const necesitaTranscripcion = c.transcripcion_estado !== 'completa' &&
@@ -1702,10 +1841,12 @@ async function transcribeConvention(id, options = {}) {
     }
     setDocActivity(id, `IA: transcribiendo ${paginas.length - pendientes.length}/${paginas.length}`);
     let failed = null;
+    let pausado = false;
     const transcribePage = async pageNumber => {
+      if (auto && state.autoPaused) { pausado = true; return; }
       await acquirePageSlot();
       try {
-        if (failed) return;
+        if (failed || (auto && state.autoPaused)) { pausado = true; return; }
         const base64 = await renderPageJPEG(pdf, pageNumber, 2000, 3, 0.88);
         const status = await withRetries(
           () => call('TranscribePage', id, pageNumber, base64),
@@ -1728,6 +1869,9 @@ async function transcribeConvention(id, options = {}) {
       }
     };
     await Promise.all(pendientes.map(transcribePage));
+    // Pausa: no se cierra la transcripción ni se marca como fallida; las
+    // páginas ya enviadas quedan guardadas y se retoma con ResumeTranscription.
+    if (pausado || (auto && state.autoPaused)) throw pausadoError();
     if (failed) throw failed;
     await textCall('FinishTranscription', id);
     transcribed = true;
@@ -1738,6 +1882,7 @@ async function transcribeConvention(id, options = {}) {
     await refreshData();
     await loadList();
     if (state.config.ai_enabled && state.config.has_api_key) {
+      if (auto && state.autoPaused) throw pausadoError();
       setDocActivity(id, 'IA: extrayendo datos…');
       try {
         await textCall('ExtractAI', id);
@@ -1756,6 +1901,12 @@ async function transcribeConvention(id, options = {}) {
       }
     }
   } catch (err) {
+    if (err && err.paused) {
+      // Al pausar no se marca error ni se queda «en proceso»: vuelve a
+      // «pendiente» y lo transcrito se conserva.
+      try { await call('PauseTranscription', id); } catch (_) {}
+      throw err;
+    }
     if (!transcribed) {
       try { await call('FailTranscription', id, errorText(err)); } catch (_) {}
     }
@@ -1797,8 +1948,10 @@ async function extractAI() {
       state.current = verified;
       renderDetail();
     }
+    state.autoQueue = state.autoQueue.filter(x => x !== c.id);
     await refreshData();
     await loadList();
+    renderProcessingBanner();
     showToast('Análisis completado. Revisa los datos y las sugerencias.', 'success');
   } catch (err) {
     $('#ai-status').textContent = '';
@@ -1862,7 +2015,7 @@ async function openImport() {
   }
 }
 
-const MAX_IMPORT = 60;
+const MAX_IMPORT = 200;
 
 async function openImportWith(paths) {
   if (state.view !== 'convenios' && !await navigate('convenios')) return;
@@ -1916,7 +2069,9 @@ async function confirmImport() {
     if (ok > 0) showToast(`${ok} PDF importado${ok === 1 ? '' : 's'}.`, 'success');
     if (errors.length) showToast(`${errors.length} archivo${errors.length === 1 ? '' : 's'} no se pudo importar.`, 'error');
     if (ok > 0 && state.config.ai_enabled && state.config.has_api_key) {
-      showToast('La IA procesará automáticamente los archivos importados.', 'info');
+      showToast(state.autoPaused
+        ? 'Los archivos quedaron en la cola; pulsa «Continuar» para procesarlos.'
+        : 'La IA procesará automáticamente los archivos importados.', 'info');
       startAutoAI(results.filter(r => !r.error && !r.cloned).map(r => r.id));
     }
     if (ok > 0 && !errors.length) {
@@ -2495,8 +2650,10 @@ async function analyzeWithAI(ids) {
     const ok = await confirmDialog('Volver a analizar', `${intro} Al analizar de nuevo, los datos capturados (dependencia, firmantes, fechas y notas) se reemplazan con lo que lea la IA. Las etiquetas que pusiste a mano se conservan.`, 'Analizar de nuevo', false);
     if (!ok) return;
   }
-  startAutoAI(ids);
-  showToast(ids.length === 1 ? 'Análisis con IA iniciado.' : `Análisis con IA iniciado para ${ids.length} convenios.`, 'info');
+  startAutoAI(ids, true);
+  showToast(state.autoPaused
+    ? 'Quedaron en la cola; pulsa «Continuar» para analizarlos.'
+    : (ids.length === 1 ? 'Análisis con IA iniciado.' : `Análisis con IA iniciado para ${ids.length} convenios.`), 'info');
   if (state.view === 'convenios') renderList();
 }
 
@@ -2514,6 +2671,7 @@ async function setArchived(ids, archived) {
       ? `${n} convenio${plural} archivado${plural}. Lo${plural} encuentras en Archivados.`
       : `${n} convenio${plural} de vuelta en la lista principal.`, 'success');
     ids.forEach(id => { state.selected.delete(id); state.arch.selected.delete(id); });
+    if (archived) state.autoQueue = state.autoQueue.filter(x => !ids.includes(x));
     if (state.current && ids.includes(state.current.id)) {
       state.current = await call('GetConvenio', state.current.id);
       if (state.view === 'detalle') renderDetail();
